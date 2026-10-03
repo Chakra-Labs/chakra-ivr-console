@@ -2,6 +2,7 @@ import crypto from "crypto";
 
 import { currentAdmin, unauthorized } from "@/lib/auth";
 import { pool, TIME_ZONE, usageSchema } from "@/lib/db";
+import { isPipeline } from "@/lib/pipelines";
 
 // Client API keys. Stored as SHA-256 hashes (see chakra-license-server
 // migrations/001_hash_tokens.sql): the full key is returned exactly once — when
@@ -15,7 +16,8 @@ let mockLicenses: Record<string, unknown>[] = [
   { id: 2, company_name: "Island Tours Pvt Ltd", token_prefix: "chk_live_tour45", is_active: false, month_minutes: 1050, package_name: "Standard" },
 ];
 
-const PUBLIC_COLUMNS = "id, company_name, token_prefix, is_active, used_minutes, package_name, created_at";
+const PUBLIC_COLUMNS =
+  "id, company_name, token_prefix, is_active, used_minutes, package_name, pipelines, agent_pipelines, created_at";
 
 function newKey() {
   const token = `chk_live_${crypto.randomBytes(32).toString("hex")}`;
@@ -103,7 +105,15 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   if (!(await currentAdmin())) return unauthorized();
-  let body: { id?: unknown; action?: unknown; companyName?: unknown; isActive?: unknown; packageName?: unknown };
+  let body: {
+    id?: unknown;
+    action?: unknown;
+    companyName?: unknown;
+    isActive?: unknown;
+    packageName?: unknown;
+    pipelines?: unknown;
+    agentPipelines?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -117,7 +127,10 @@ export async function PUT(request: Request) {
     if (!row) return Response.json({ error: "Not found" }, { status: 404 });
     if (body.action === "edit" && body.companyName) row.company_name = String(body.companyName);
     else if (body.action === "toggle_status") row.is_active = Boolean(body.isActive);
-    else if (body.action === "rotate") {
+    else if (body.action === "pipelines") {
+      row.pipelines = Array.isArray(body.pipelines) ? body.pipelines.filter(isPipeline) : [];
+      row.agent_pipelines = body.agentPipelines ?? {};
+    } else if (body.action === "rotate") {
       const key = newKey();
       row.token_prefix = key.prefix;
       return Response.json({ ...row, token: key.token });
@@ -142,6 +155,21 @@ export async function PUT(request: Request) {
       result = await pool.query(
         `UPDATE licenses SET package_name = $1 WHERE id = $2 RETURNING ${PUBLIC_COLUMNS}`,
         [body.packageName.trim().slice(0, 80), id],
+      );
+    } else if (body.action === "pipelines") {
+      // What chakra-ivr-core runs for this licence: read from the signed licence
+      // check, so it takes effect at the client's next start (and within its
+      // 10-minute re-check for calls already running).
+      const pipelines = Array.isArray(body.pipelines) ? [...new Set(body.pipelines.filter(isPipeline))] : [];
+      const pins: Record<string, string> = {};
+      if (body.agentPipelines && typeof body.agentPipelines === "object") {
+        for (const [agent, pipeline] of Object.entries(body.agentPipelines as Record<string, unknown>)) {
+          if (agent.trim() && isPipeline(pipeline)) pins[agent.trim().slice(0, 120)] = pipeline;
+        }
+      }
+      result = await pool.query(
+        `UPDATE licenses SET pipelines = $1, agent_pipelines = $2::jsonb WHERE id = $3 RETURNING ${PUBLIC_COLUMNS}`,
+        [pipelines, JSON.stringify(pins), id],
       );
     } else if (body.action === "rotate") {
       // A lost key can't be shown again (only its hash is kept): issue a new one.

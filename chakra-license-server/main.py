@@ -41,7 +41,7 @@ MOCK_MODE = os.getenv("LICENSE_SERVER_MOCK") == "1"
 MOCK_VALID_TOKENS = {"chk_live_test123": True, "chk_live_unpaid456": False}
 
 LOOKUP = """
-    SELECT id, company_name, package_name, is_active FROM licenses
+    SELECT id, company_name, package_name, is_active, pipelines, agent_pipelines FROM licenses
     WHERE token_hash = $1 OR (token_hash IS NULL AND token = $2)
 """
 
@@ -57,6 +57,21 @@ CREATE TABLE IF NOT EXISTS call_usage (
 """
 
 PIPELINES = {"chakra", "gemini_live", "unknown"}
+
+PIPELINE_COLUMNS = (
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS pipelines TEXT[] NOT NULL DEFAULT '{}'",
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS agent_pipelines JSONB NOT NULL DEFAULT '{}'::jsonb",
+)
+
+
+def _pipelines(row) -> tuple[list[str], dict[str, str]]:
+    """The licence's pipelines (first = default) and per-agent pins, cleaned."""
+    allowed = [p for p in (row.get("pipelines") or []) if p in PIPELINES - {"unknown"}]
+    raw = row.get("agent_pipelines") or {}
+    if isinstance(raw, str):
+        raw = json.loads(raw or "{}")
+    agents = {str(k): v for k, v in raw.items() if v in PIPELINES - {"unknown"}} if isinstance(raw, dict) else {}
+    return allowed, agents
 
 
 def key_hash(token: str) -> str:
@@ -82,6 +97,10 @@ async def lifespan(app: FastAPI):
     if database_url:
         db_pool = await asyncpg.create_pool(database_url, min_size=1, max_size=10)
         await db_pool.execute(CALL_USAGE_SCHEMA)
+        # The lookup reads these; never serve before they exist (init_db.py adds
+        # them too).
+        for statement in PIPELINE_COLUMNS:
+            await db_pool.execute(statement)
     elif not MOCK_MODE:
         raise RuntimeError("DATABASE_URL is not set (set LICENSE_SERVER_MOCK=1 for local testing only)")
     else:
@@ -166,11 +185,17 @@ async def verify_signed(req: VerifyRequest):
         row = await _lookup(req.token)
         if not row or not row["is_active"]:
             raise _refuse()
+        row = dict(row)
+    pipelines, agent_pipelines = _pipelines(row)
     payload = {
         "status": "valid",
         "license_id": row["id"],
         "company": row["company_name"],
         "package": row["package_name"],
+        # Which pipelines this licence may run (first = default) and any agents
+        # pinned to one. Empty: not assigned, the client's configuration decides.
+        "pipelines": pipelines,
+        "agent_pipelines": agent_pipelines,
         "key_hash": key_hash(req.token),
         "nonce": req.nonce,
         "issued_at": int(time.time()),

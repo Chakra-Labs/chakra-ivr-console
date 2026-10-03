@@ -9,6 +9,10 @@ export interface Client {
   token_prefix?: string | null;
   is_active: boolean;
   package_name?: string | null;
+  /** Voice pipelines this licence may run, first = default; empty = not assigned. */
+  pipelines?: string[] | null;
+  /** Agents pinned to one pipeline (agent name → pipeline). */
+  agent_pipelines?: Record<string, string> | null;
   created_at?: string | null;
   /** Speech minutes (STT + TTS audio) since the 1st of this month. */
   month_minutes: number;

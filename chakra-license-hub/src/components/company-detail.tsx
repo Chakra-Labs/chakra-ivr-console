@@ -10,6 +10,7 @@ import { AlertTriangle, ArrowLeft, Building, Calendar, Clock, Gauge, Key, Refres
 import { Badge, Button, Card, ChartSkeleton, Empty, ErrorBanner, KeyValue, LinesSkeleton, Meter, MiniStat, Segmented, Skeleton, Stat, Spinner, cx, inputClass } from "./ui";
 import { ago, compact, dateOnly, dateTime, dayLabel, minutes, num, pct, signedPct } from "@/lib/format";
 import { INFLIGHT_PER_LINE, findPackage, gpusFor, packageLines, packageQuota } from "@/lib/packages";
+import { PIPELINES, formatAgentPins, parseAgentPins, pipelineLabel } from "@/lib/pipelines";
 import type { Client, LicenseUsage } from "@/lib/types";
 
 const EMPTY_USAGE: LicenseUsage = {
@@ -121,6 +122,11 @@ export default function CompanyDetail({ id }: { id: number }) {
           <KeyValue label="Package">{client.package_name || "Essential"}</KeyValue>
           <KeyValue label="Monthly minutes">{num(quota)} min</KeyValue>
           <KeyValue label="Concurrent lines">{num(lines)}</KeyValue>
+          <KeyValue label="Voice pipeline">
+            {client.pipelines?.length
+              ? client.pipelines.map((p, i) => (i === 0 ? pipelineLabel(p) : `+ ${pipelineLabel(p)}`)).join(" ")
+              : "Not assigned (client config)"}
+          </KeyValue>
           <KeyValue label="Status">{client.is_active ? "Active" : "Suspended"}</KeyValue>
           <KeyValue label="Licence key">
             <span className="font-mono text-[12px]">{client.token_prefix ?? "chk_live_"}…</span>
@@ -300,6 +306,66 @@ function CapacityCard({ client, lines, usage }: { client: Client; lines: number;
   );
 }
 
+function PipelineSettings({
+  client,
+  busy,
+  onSave,
+}: {
+  client: Client;
+  busy: string | null;
+  onSave: (body: { pipelines: string[]; agentPipelines: Record<string, string> }) => void;
+}) {
+  const current = client.pipelines ?? [];
+  const [primary, setPrimary] = useState<string>(current[0] ?? "");
+  const [alsoOther, setAlsoOther] = useState(current.length > 1);
+  const [pins, setPins] = useState(formatAgentPins(client.agent_pipelines));
+  const other = PIPELINES.find((p) => p.id !== primary);
+  const next = primary ? [primary, ...(alsoOther && other ? [other.id] : [])] : [];
+  const nextPins = parseAgentPins(pins);
+  const unchanged =
+    JSON.stringify(next) === JSON.stringify(current) &&
+    JSON.stringify(nextPins) === JSON.stringify(client.agent_pipelines ?? {});
+
+  return (
+    <div>
+      <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor="company-pipeline">Voice pipeline</label>
+      <div className="flex gap-2">
+        <select id="company-pipeline" className={inputClass} value={primary} onChange={(e) => setPrimary(e.target.value)}>
+          <option value="">Not assigned (the client&apos;s config decides)</option>
+          {PIPELINES.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label} · {p.detail}
+            </option>
+          ))}
+        </select>
+        <Button disabled={unchanged || busy !== null} onClick={() => onSave({ pipelines: next, agentPipelines: nextPins })}>
+          {busy === "Pipeline" && <Spinner size={13} />} Save
+        </Button>
+      </div>
+      {primary && other && (
+        <label className="mt-2 flex items-center gap-2 text-[12px] text-ink-2">
+          <input type="checkbox" checked={alsoOther} onChange={(e) => setAlsoOther(e.target.checked)} />
+          Also allow {other.label} (for agents pinned to it, or the client choosing it)
+        </label>
+      )}
+      <label className="block text-[12px] text-ink-2 mt-3 mb-1.5" htmlFor="company-agent-pins">
+        Agents pinned to a pipeline <span className="text-ink-3">(optional, one per line: agent = chakra | gemini_live)</span>
+      </label>
+      <textarea
+        id="company-agent-pins"
+        className={cx(inputClass, "font-mono text-[12px] min-h-[64px]")}
+        value={pins}
+        placeholder="sayury-ai = chakra"
+        onChange={(e) => setPins(e.target.value)}
+      />
+      <p className="text-[11px] text-ink-3 mt-1.5">
+        Read from the signed licence check: takes effect when the client&apos;s agents next start (running agents within 10 minutes).
+        A pinned agent&apos;s pipeline must also be allowed above.
+      </p>
+    </div>
+  );
+}
+
 function ManageLicense({ client }: { client: Client }) {
   const { packages, setClients, toast, rotateKey, navigate } = useHub();
   const [name, setName] = useState(client.company_name);
@@ -368,6 +434,8 @@ function ManageLicense({ client }: { client: Client }) {
           </div>
           <p className="text-[11px] text-ink-3 mt-1.5">The GPU fleet re-sizes from packages, so check GPU fleet after an upgrade.</p>
         </div>
+
+        <PipelineSettings client={client} busy={busy} onSave={(body) => update({ action: "pipelines", ...body }, "Pipeline")} />
 
         <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-panel-2 border border-line">
           <div>
