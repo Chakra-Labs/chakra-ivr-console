@@ -360,7 +360,7 @@ function PipelineSettings({
       />
       <p className="text-[11px] text-ink-3 mt-1.5">
         Read from the signed licence check: takes effect when the client&apos;s agents next start (running agents within 10 minutes).
-        A pinned agent&apos;s pipeline must also be allowed above.
+        A pin always wins; otherwise the client&apos;s own setting is used only if allowed here, else the default.
       </p>
     </div>
   );
