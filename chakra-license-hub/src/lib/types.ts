@@ -13,6 +13,12 @@ export interface Client {
   pipelines?: string[] | null;
   /** Agents pinned to one pipeline (agent name → pipeline). */
   agent_pipelines?: Record<string, string> | null;
+  /** Daily talk time per caller, in minutes; 0 = no limit. */
+  daily_limit_minutes?: number | null;
+  /** Seconds before the daily limit the caller is warned; 0 = no warning. */
+  limit_warning_seconds?: number | null;
+  /** Agents with their own daily limit (agent name → minutes; 0 = none). */
+  agent_daily_limits?: Record<string, number> | null;
   created_at?: string | null;
   /** Speech minutes (STT + TTS audio) since the 1st of this month. */
   month_minutes: number;

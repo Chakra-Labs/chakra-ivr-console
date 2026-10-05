@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS licenses (
 PIPELINE_COLUMNS = (
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS pipelines TEXT[] NOT NULL DEFAULT '{}'",
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS agent_pipelines JSONB NOT NULL DEFAULT '{}'::jsonb",
+    # Added 2026-10-05: daily talk time per caller (0 = none), the warning before
+    # it runs out, and agents with their own limit ({agent: minutes}).
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS daily_limit_minutes INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS limit_warning_seconds INTEGER NOT NULL DEFAULT 60",
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS agent_daily_limits JSONB NOT NULL DEFAULT '{}'::jsonb",
 )
 
 

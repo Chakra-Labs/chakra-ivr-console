@@ -2,6 +2,7 @@ import crypto from "crypto";
 
 import { currentAdmin, unauthorized } from "@/lib/auth";
 import { hasCallUsage, OFF_GATEWAY, pool, TIME_ZONE, usageSchema } from "@/lib/db";
+import { MAX_LIMIT_MINUTES, MAX_WARNING_SECONDS, wholeNumber } from "@/lib/daily-limit";
 import { isPipeline } from "@/lib/pipelines";
 
 // Client API keys. Stored as SHA-256 hashes (see chakra-license-server
@@ -17,7 +18,8 @@ let mockLicenses: Record<string, unknown>[] = [
 ];
 
 const PUBLIC_COLUMNS =
-  "id, company_name, token_prefix, is_active, used_minutes, package_name, pipelines, agent_pipelines, created_at";
+  "id, company_name, token_prefix, is_active, used_minutes, package_name, pipelines, agent_pipelines, " +
+  "daily_limit_minutes, limit_warning_seconds, agent_daily_limits, created_at";
 
 function newKey() {
   const token = `chk_live_${crypto.randomBytes(32).toString("hex")}`;
@@ -35,6 +37,21 @@ function noDatabase(): Response {
 function serverError(error: unknown, what: string): Response {
   console.error(`Database error (${what}):`, error);
   return Response.json({ error: `Failed to ${what}` }, { status: 500 });
+}
+
+/** The validated daily-limit fields of a PUT body, or null when any is out of range. */
+function dailyLimitBody(body: { dailyLimitMinutes?: unknown; limitWarningSeconds?: unknown; agentDailyLimits?: unknown }) {
+  const minutes = wholeNumber(body.dailyLimitMinutes, MAX_LIMIT_MINUTES);
+  const warning = wholeNumber(body.limitWarningSeconds, MAX_WARNING_SECONDS);
+  if (minutes === null || warning === null) return null;
+  const agents: Record<string, number> = {};
+  if (body.agentDailyLimits && typeof body.agentDailyLimits === "object") {
+    for (const [agent, value] of Object.entries(body.agentDailyLimits as Record<string, unknown>)) {
+      const n = wholeNumber(value, MAX_LIMIT_MINUTES);
+      if (agent.trim() && n !== null) agents[agent.trim().slice(0, 120)] = n;
+    }
+  }
+  return { daily_limit_minutes: minutes, limit_warning_seconds: warning, agent_daily_limits: agents };
 }
 
 export async function GET() {
@@ -126,6 +143,9 @@ export async function PUT(request: Request) {
     packageName?: unknown;
     pipelines?: unknown;
     agentPipelines?: unknown;
+    dailyLimitMinutes?: unknown;
+    limitWarningSeconds?: unknown;
+    agentDailyLimits?: unknown;
   };
   try {
     body = await request.json();
@@ -143,6 +163,10 @@ export async function PUT(request: Request) {
     else if (body.action === "pipelines") {
       row.pipelines = Array.isArray(body.pipelines) ? body.pipelines.filter(isPipeline) : [];
       row.agent_pipelines = body.agentPipelines ?? {};
+    } else if (body.action === "daily_limit") {
+      const limit = dailyLimitBody(body);
+      if (!limit) return Response.json({ error: "Invalid daily limit" }, { status: 400 });
+      Object.assign(row, limit);
     } else if (body.action === "rotate") {
       const key = newKey();
       row.token_prefix = key.prefix;
@@ -183,6 +207,16 @@ export async function PUT(request: Request) {
       result = await pool.query(
         `UPDATE licenses SET pipelines = $1, agent_pipelines = $2::jsonb WHERE id = $3 RETURNING ${PUBLIC_COLUMNS}`,
         [pipelines, JSON.stringify(pins), id],
+      );
+    } else if (body.action === "daily_limit") {
+      // Daily talk time per caller, read by chakra-ivr-core 0.5+ from the signed
+      // licence check: applies within the client's 10-minute re-check.
+      const limit = dailyLimitBody(body);
+      if (!limit) return Response.json({ error: "Invalid daily limit" }, { status: 400 });
+      result = await pool.query(
+        `UPDATE licenses SET daily_limit_minutes = $1, limit_warning_seconds = $2, agent_daily_limits = $3::jsonb
+         WHERE id = $4 RETURNING ${PUBLIC_COLUMNS}`,
+        [limit.daily_limit_minutes, limit.limit_warning_seconds, JSON.stringify(limit.agent_daily_limits), id],
       );
     } else if (body.action === "rotate") {
       // A lost key can't be shown again (only its hash is kept): issue a new one.

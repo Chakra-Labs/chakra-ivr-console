@@ -10,6 +10,7 @@ import { AlertTriangle, ArrowLeft, Building, Calendar, Clock, Gauge, Key, Refres
 import { Badge, Button, Card, ChartSkeleton, Empty, ErrorBanner, KeyValue, LinesSkeleton, Meter, MiniStat, Segmented, Skeleton, Stat, Spinner, cx, inputClass } from "./ui";
 import { ago, compact, dateOnly, dateTime, dayLabel, minutes, num, pct, signedPct } from "@/lib/format";
 import { INFLIGHT_PER_LINE, findPackage, gpusFor, packageLines, packageQuota } from "@/lib/packages";
+import { MAX_LIMIT_MINUTES, MAX_WARNING_SECONDS, describeLimit, formatAgentLimits, parseAgentLimits, wholeNumber } from "@/lib/daily-limit";
 import { PIPELINES, formatAgentPins, parseAgentPins, pipelineLabel } from "@/lib/pipelines";
 import type { Client, LicenseUsage } from "@/lib/types";
 
@@ -128,6 +129,10 @@ export default function CompanyDetail({ id }: { id: number }) {
             {client.pipelines?.length
               ? client.pipelines.map((p, i) => (i === 0 ? pipelineLabel(p) : `+ ${pipelineLabel(p)}`)).join(" ")
               : "Not assigned (client config)"}
+          </KeyValue>
+          <KeyValue label="Daily talk time">
+            {describeLimit(client.daily_limit_minutes, client.limit_warning_seconds)}
+            {Object.keys(client.agent_daily_limits ?? {}).length > 0 && " · some agents differ"}
           </KeyValue>
           <KeyValue label="Status">{client.is_active ? "Active" : "Suspended"}</KeyValue>
           <KeyValue label="Licence key">
@@ -370,6 +375,86 @@ function PipelineSettings({
   );
 }
 
+function DailyLimitSettings({
+  client,
+  busy,
+  onSave,
+}: {
+  client: Client;
+  busy: string | null;
+  onSave: (body: { dailyLimitMinutes: number; limitWarningSeconds: number; agentDailyLimits: Record<string, number> }) => void;
+}) {
+  const [minutes, setMinutes] = useState(String(client.daily_limit_minutes ?? 0));
+  const [warning, setWarning] = useState(String(client.limit_warning_seconds ?? 60));
+  const [agents, setAgents] = useState(formatAgentLimits(client.agent_daily_limits));
+  const nextMinutes = wholeNumber(minutes, MAX_LIMIT_MINUTES);
+  const nextWarning = wholeNumber(warning, MAX_WARNING_SECONDS);
+  const nextAgents = parseAgentLimits(agents);
+  const valid = nextMinutes !== null && nextWarning !== null;
+  const unchanged =
+    nextMinutes === (client.daily_limit_minutes ?? 0) &&
+    nextWarning === (client.limit_warning_seconds ?? 60) &&
+    JSON.stringify(nextAgents) === JSON.stringify(client.agent_daily_limits ?? {});
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor="company-daily-limit">
+            Daily talk time per caller <span className="text-ink-3">(minutes, 0 = no limit)</span>
+          </label>
+          <input
+            id="company-daily-limit"
+            className={cx(inputClass, nextMinutes === null && "border-critical")}
+            inputMode="numeric"
+            value={minutes}
+            onChange={(e) => setMinutes(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor="company-limit-warning">
+            Warn before the end <span className="text-ink-3">(seconds, 0 = no warning)</span>
+          </label>
+          <input
+            id="company-limit-warning"
+            className={cx(inputClass, nextWarning === null && "border-critical")}
+            inputMode="numeric"
+            value={warning}
+            onChange={(e) => setWarning(e.target.value)}
+          />
+        </div>
+      </div>
+      <label className="block text-[12px] text-ink-2 mt-3 mb-1.5" htmlFor="company-agent-limits">
+        Agents with their own limit <span className="text-ink-3">(optional, one per line: agent = minutes; 0 = no limit)</span>
+      </label>
+      <div className="flex gap-2 items-start">
+        <textarea
+          id="company-agent-limits"
+          className={cx(inputClass, "font-mono text-[12px] min-h-[64px]")}
+          value={agents}
+          placeholder="sayuru-ai-tamil = 10"
+          onChange={(e) => setAgents(e.target.value)}
+        />
+        <Button
+          disabled={!valid || unchanged || busy !== null}
+          onClick={() => {
+            if (nextMinutes !== null && nextWarning !== null) {
+              onSave({ dailyLimitMinutes: nextMinutes, limitWarningSeconds: nextWarning, agentDailyLimits: nextAgents });
+            }
+          }}
+        >
+          {busy === "Daily limit" && <Spinner size={13} />} Save
+        </Button>
+      </div>
+      <p className="text-[11px] text-ink-3 mt-1.5">
+        Minutes each phone number may talk per day (Sri Lanka time), counted from the client&apos;s own call records. A caller
+        who is out of time is told to call back tomorrow; a call is warned, then ended, when the time runs out. Needs
+        chakra-ivr-core 0.5+; applies within 10 minutes.
+      </p>
+    </div>
+  );
+}
+
 function ManageLicense({ client }: { client: Client }) {
   const { packages, setClients, toast, rotateKey, navigate } = useHub();
   const [name, setName] = useState(client.company_name);
@@ -440,6 +525,7 @@ function ManageLicense({ client }: { client: Client }) {
         </div>
 
         <PipelineSettings client={client} busy={busy} onSave={(body) => update({ action: "pipelines", ...body }, "Pipeline")} />
+        <DailyLimitSettings client={client} busy={busy} onSave={(body) => update({ action: "daily_limit", ...body }, "Daily limit")} />
 
         <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-panel-2 border border-line">
           <div>

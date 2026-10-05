@@ -41,7 +41,8 @@ MOCK_MODE = os.getenv("LICENSE_SERVER_MOCK") == "1"
 MOCK_VALID_TOKENS = {"chk_live_test123": True, "chk_live_unpaid456": False}
 
 LOOKUP = """
-    SELECT id, company_name, package_name, is_active, pipelines, agent_pipelines FROM licenses
+    SELECT id, company_name, package_name, is_active, pipelines, agent_pipelines,
+           daily_limit_minutes, limit_warning_seconds, agent_daily_limits FROM licenses
     WHERE token_hash = $1 OR (token_hash IS NULL AND token = $2)
 """
 
@@ -61,6 +62,11 @@ PIPELINES = {"chakra", "gemini_live", "unknown"}
 PIPELINE_COLUMNS = (
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS pipelines TEXT[] NOT NULL DEFAULT '{}'",
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS agent_pipelines JSONB NOT NULL DEFAULT '{}'::jsonb",
+    # Daily talk time per caller (0 = none), the warning before it runs out, and
+    # agents with their own limit ({agent: minutes}).
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS daily_limit_minutes INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS limit_warning_seconds INTEGER NOT NULL DEFAULT 60",
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS agent_daily_limits JSONB NOT NULL DEFAULT '{}'::jsonb",
 )
 
 
@@ -72,6 +78,34 @@ def _pipelines(row) -> tuple[list[str], dict[str, str]]:
         raw = json.loads(raw or "{}")
     agents = {str(k): v for k, v in raw.items() if v in PIPELINES - {"unknown"}} if isinstance(raw, dict) else {}
     return allowed, agents
+
+
+def _daily_limits(row) -> tuple[int, int, dict[str, int]]:
+    """(daily talk time per caller, warning before the end, per-agent limits),
+    all in seconds, cleaned. 0 = no limit."""
+
+    def minutes(value) -> int | None:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return None
+        return number * 60 if number >= 0 else None
+
+    limit = minutes(row.get("daily_limit_minutes")) or 0
+    try:
+        warning = max(0, int(row.get("limit_warning_seconds") or 0))
+    except (TypeError, ValueError):
+        warning = 0
+    raw = row.get("agent_daily_limits") or {}
+    if isinstance(raw, str):
+        raw = json.loads(raw or "{}")
+    agents = {}
+    if isinstance(raw, dict):
+        for agent, value in raw.items():
+            seconds = minutes(value)
+            if str(agent).strip() and seconds is not None:
+                agents[str(agent).strip()] = seconds
+    return limit, warning, agents
 
 
 def key_hash(token: str) -> str:
@@ -187,6 +221,7 @@ async def verify_signed(req: VerifyRequest):
             raise _refuse()
         row = dict(row)
     pipelines, agent_pipelines = _pipelines(row)
+    daily_limit, limit_warning, agent_daily_limits = _daily_limits(row)
     payload = {
         "status": "valid",
         "license_id": row["id"],
@@ -196,6 +231,11 @@ async def verify_signed(req: VerifyRequest):
         # pinned to one. Empty: not assigned, the client's configuration decides.
         "pipelines": pipelines,
         "agent_pipelines": agent_pipelines,
+        # Daily talk time per caller, in seconds (0 = none); chakra-ivr-core
+        # 0.5+ enforces it. Older packages ignore these fields.
+        "daily_limit_seconds": daily_limit,
+        "limit_warning_seconds": limit_warning,
+        "agent_daily_limits": agent_daily_limits,
         "key_hash": key_hash(req.token),
         "nonce": req.nonce,
         "issued_at": int(time.time()),
