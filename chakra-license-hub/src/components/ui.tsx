@@ -61,8 +61,9 @@ export function Stat({
   icon?: React.ReactNode;
   tone?: "critical" | "warning";
 }) {
-  const up = delta?.ratio != null && delta.ratio > 0;
-  const down = delta?.ratio != null && delta.ratio < 0;
+  // Under half a percent shows as 0%: neutral, not an arrow and a colour.
+  const up = delta?.ratio != null && delta.ratio >= 0.005;
+  const down = delta?.ratio != null && delta.ratio <= -0.005;
   const good = (up && deltaGoodWhenUp) || (down && !deltaGoodWhenUp);
   return (
     <div
@@ -85,7 +86,7 @@ export function Stat({
         {!loading && delta && delta.ratio != null && Number.isFinite(delta.ratio) && (
           <span className={cx("inline-flex items-center gap-0.5 font-medium", up || down ? (good ? "text-good" : "text-critical") : "text-ink-3")}>
             {up ? <ArrowUpRight size={13} /> : down ? <ArrowDownRight size={13} /> : null}
-            {`${delta.ratio > 0 ? "+" : ""}${Math.round(delta.ratio * 100)}%`}
+            {`${up ? "+" : ""}${up || down ? Math.round(delta.ratio * 100) : 0}%`}
           </span>
         )}
         {!loading && delta && <span className="text-ink-3">{delta.label}</span>}

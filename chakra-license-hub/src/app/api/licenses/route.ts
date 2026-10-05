@@ -36,6 +36,12 @@ function adminOnly(viewer: Viewer | null): Response | null {
   return viewer.role === "admin" ? null : forbidden();
 }
 
+/** A licence row as a company account may see it: not which voice pipelines
+ * (technologies) it runs. Admins get the row as it is. */
+function forViewer<T extends Record<string, unknown>>(row: T, viewer: Viewer): T {
+  return viewer.role === "company" ? { ...row, pipelines: [], agent_pipelines: {} } : row;
+}
+
 function noDatabase(): Response {
   return Response.json({ error: "DATABASE_URL is not configured" }, { status: 500 });
 }
@@ -76,7 +82,7 @@ export async function GET() {
         `SELECT ${PUBLIC_COLUMNS} FROM licenses WHERE ($1::int IS NULL OR id = $1) ORDER BY created_at DESC`,
         [only],
       );
-      return Response.json(result.rows.map((r) => ({ ...r, month_minutes: 0, last_activity: null })));
+      return Response.json(result.rows.map((r) => forViewer({ ...r, month_minutes: 0, last_activity: null }, viewer)));
     }
     // Plus the call minutes of calls that bypass the gateway (see OFF_GATEWAY).
     const calls = await hasCallUsage();
@@ -107,7 +113,7 @@ export async function GET() {
        ORDER BY l.created_at DESC`,
       [TIME_ZONE, only],
     );
-    return Response.json(result.rows);
+    return Response.json(result.rows.map((r) => forViewer(r, viewer)));
   } catch (error) {
     return serverError(error, "fetch licenses");
   }
@@ -251,7 +257,7 @@ export async function PUT(request: Request) {
       return Response.json({ error: "Invalid action" }, { status: 400 });
     }
     if (result.rowCount === 0) return Response.json({ error: "Not found" }, { status: 404 });
-    return Response.json(result.rows[0]);
+    return Response.json(forViewer(result.rows[0], viewer));
   } catch (error) {
     return serverError(error, "update license");
   }

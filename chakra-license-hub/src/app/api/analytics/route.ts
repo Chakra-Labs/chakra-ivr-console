@@ -21,7 +21,7 @@ const f = (v: unknown) => Number(v ?? 0) || 0;
 
 const EMPTY_USAGE: LicenseUsage = {
   license_id: 0, month_minutes: 0, month_stt_min: 0, month_tts_min: 0, month_live_min: 0, month_calls: 0,
-  last_mtd_calls: 0, month_requests: 0, month_errors: 0, month_rejected: 0, month_peak_inflight: 0,
+  last_mtd_calls: 0, last_month_calls: 0, month_call_min: 0, last_mtd_call_min: 0, month_requests: 0, month_errors: 0, month_rejected: 0, month_peak_inflight: 0,
   last_mtd_minutes: 0, last_mtd_requests: 0, last_mtd_errors: 0, last_month_minutes: 0, last_month_requests: 0,
   last_activity: null,
 };
@@ -140,6 +140,9 @@ export async function GET(request: NextRequest) {
                COALESCE(SUM(call_seconds) FILTER (WHERE ${OFF_GATEWAY} AND hour >= b.lm AND hour < b.m), 0)::float8 / 60 AS last_month_min,
                COALESCE(SUM(calls) FILTER (WHERE hour >= b.m), 0)::int AS month_calls,
                COALESCE(SUM(calls) FILTER (WHERE hour >= b.lm AND hour < b.lm + (now() - b.m)), 0)::int AS last_mtd_calls,
+               COALESCE(SUM(calls) FILTER (WHERE hour >= b.lm AND hour < b.m), 0)::int AS last_month_calls,
+               COALESCE(SUM(call_seconds) FILTER (WHERE hour >= b.m), 0)::float8 / 60 AS month_call_min,
+               COALESCE(SUM(call_seconds) FILTER (WHERE hour >= b.lm AND hour < b.lm + (now() - b.m)), 0)::float8 / 60 AS last_mtd_call_min,
                MAX(hour) AS last_activity
              FROM call_usage, b
              WHERE ($3::int IS NULL OR license_id = $3)
@@ -172,7 +175,10 @@ export async function GET(request: NextRequest) {
     ]);
 
     const seen = new Map(lastSeen.rows.map((r) => [Number(r.license_id), r.last_activity as Date]));
-    const callsBy = new Map<number, { month: number; lastMtd: number; lastMonth: number; calls: number; lastMtdCalls: number }>();
+    const callsBy = new Map<
+      number,
+      { month: number; lastMtd: number; lastMonth: number; calls: number; lastMtdCalls: number; lastMonthCalls: number; callMin: number; lastMtdCallMin: number }
+    >();
     for (const r of calls?.rows ?? []) {
       const id = Number(r.license_id);
       callsBy.set(id, {
@@ -181,6 +187,9 @@ export async function GET(request: NextRequest) {
         lastMonth: f(r.last_month_min),
         calls: f(r.month_calls),
         lastMtdCalls: f(r.last_mtd_calls),
+        lastMonthCalls: f(r.last_month_calls),
+        callMin: f(r.month_call_min),
+        lastMtdCallMin: f(r.last_mtd_call_min),
       });
       const at = r.last_activity as Date | null;
       if (at && (!seen.has(id) || at > seen.get(id)!)) seen.set(id, at);
@@ -193,6 +202,9 @@ export async function GET(request: NextRequest) {
       month_live_min: 0,
       month_calls: 0,
       last_mtd_calls: 0,
+      last_month_calls: 0,
+      month_call_min: 0,
+      last_mtd_call_min: 0,
       month_requests: f(r.month_requests),
       month_errors: f(r.month_errors),
       month_rejected: f(r.month_rejected),
@@ -219,6 +231,9 @@ export async function GET(request: NextRequest) {
       l.last_month_minutes += c.lastMonth;
       l.month_calls = c.calls;
       l.last_mtd_calls = c.lastMtdCalls;
+      l.last_month_calls = c.lastMonthCalls;
+      l.month_call_min = c.callMin;
+      l.last_mtd_call_min = c.lastMtdCallMin;
     }
 
     const callDays = new Map((callsDaily?.rows ?? []).map((r) => [r.day as string, r]));
@@ -233,7 +248,7 @@ export async function GET(request: NextRequest) {
       heatmap.set(key, cell);
     }
 
-    return Response.json({
+    const result: Analytics = {
       ...base,
       daily: fillDays(
         firstDay,
@@ -248,18 +263,43 @@ export async function GET(request: NextRequest) {
           rejected: f(r.rejected),
           live_min: 0,
           calls: 0,
+          minutes: 0,
         })),
       ).map((d) => {
         const c = callDays.get(d.day);
-        return c ? { ...d, live_min: f(c.live_min), calls: f(c.calls) } : d;
+        const withCalls = c ? { ...d, live_min: f(c.live_min), calls: f(c.calls) } : d;
+        return { ...withCalls, minutes: withCalls.stt_min + withCalls.tts_min + withCalls.live_min };
       }),
       heatmap: [...heatmap.values()],
       licenses,
-    } satisfies Analytics);
+    };
+    // A company account gets totals only: which speech engines and models serve
+    // its calls (STT/TTS/Gemini Live, speech requests, GPU load) is Chakra Labs'.
+    return Response.json(viewer.role === "company" ? forCompany(result) : result);
   } catch (error) {
     console.error("Database error (analytics):", error);
     return Response.json({ error: "Failed to load analytics" }, { status: 500 });
   }
+}
+
+/** The analytics a company account may see: minutes and calls, nothing that
+ * names the technology behind them. */
+function forCompany(a: Analytics): Analytics {
+  return {
+    ...a,
+    extended: false,
+    daily: a.daily.map((d) => ({
+      day: d.day, minutes: d.minutes, calls: d.calls,
+      stt_min: 0, tts_min: 0, live_min: 0, stt_requests: 0, tts_requests: 0, errors: 0, rejected: 0,
+    })),
+    heatmap: a.heatmap.map((h) => ({ ...h, requests: 0 })),
+    licenses: a.licenses.map((l) => ({
+      ...l,
+      month_stt_min: 0, month_tts_min: 0, month_live_min: 0,
+      month_requests: 0, month_errors: 0, month_rejected: 0, month_peak_inflight: 0,
+      last_mtd_requests: 0, last_mtd_errors: 0, last_month_requests: 0,
+    })),
+  };
 }
 
 /** One point per day from `first`, zero where nothing was used. */
@@ -269,7 +309,7 @@ function fillDays(first: string, days: number, rows: DailyPoint[]): DailyPoint[]
   const out: DailyPoint[] = [];
   for (let i = 0; i < days; i++) {
     const day = new Date(Date.UTC(y, m - 1, d + i)).toISOString().slice(0, 10);
-    out.push(byDay.get(day) ?? { day, stt_min: 0, tts_min: 0, stt_requests: 0, tts_requests: 0, errors: 0, rejected: 0, live_min: 0, calls: 0 });
+    out.push(byDay.get(day) ?? { day, stt_min: 0, tts_min: 0, stt_requests: 0, tts_requests: 0, errors: 0, rejected: 0, live_min: 0, calls: 0, minutes: 0 });
   }
   return out;
 }

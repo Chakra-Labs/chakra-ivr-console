@@ -52,6 +52,8 @@ export interface DailyPoint {
   live_min: number;
   /** Finished calls on every pipeline, as chakra-ivr-core reports them. */
   calls: number;
+  /** All the day's minutes (speech + Gemini Live): what a company account sees. */
+  minutes: number;
 }
 
 export interface HeatCell {
@@ -68,9 +70,12 @@ export interface LicenseUsage {
   month_stt_min: number;
   month_tts_min: number;
   month_live_min: number;
-  /** Finished calls on every pipeline. */
+  /** Finished calls on every pipeline, and their talk time (call minutes). */
   month_calls: number;
   last_mtd_calls: number;
+  last_month_calls: number;
+  month_call_min: number;
+  last_mtd_call_min: number;
   month_requests: number;
   month_errors: number;
   month_rejected: number;

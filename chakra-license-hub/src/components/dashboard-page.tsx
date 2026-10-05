@@ -259,7 +259,7 @@ export default function DashboardPage() {
                     <td className="py-2.5 text-ink-2">{r.label}</td>
                     <td className="py-2.5 text-right text-ink">{r.fmt(r.now)}</td>
                     <td className="py-2.5 text-right text-ink-2">{r.fmt(r.before)}</td>
-                    <td className={cx("py-2.5 text-right font-medium", ch == null || ch === 0 ? "text-ink-3" : good ? "text-good" : "text-critical")}>
+                    <td className={cx("py-2.5 text-right font-medium", ch == null || Math.abs(ch) < 0.005 ? "text-ink-3" : good ? "text-good" : "text-critical")}>
                       {ch == null ? "new" : signedPct(ch)}
                     </td>
                   </tr>

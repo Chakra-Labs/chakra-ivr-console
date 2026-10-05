@@ -16,7 +16,7 @@ import type { Client, LicenseUsage } from "@/lib/types";
 
 const EMPTY_USAGE: LicenseUsage = {
   license_id: 0, month_minutes: 0, month_stt_min: 0, month_tts_min: 0, month_live_min: 0, month_calls: 0,
-  last_mtd_calls: 0, month_requests: 0, month_errors: 0,
+  last_mtd_calls: 0, last_month_calls: 0, month_call_min: 0, last_mtd_call_min: 0, month_requests: 0, month_errors: 0,
   month_rejected: 0, month_peak_inflight: 0, last_mtd_minutes: 0, last_mtd_requests: 0, last_mtd_errors: 0,
   last_month_minutes: 0, last_month_requests: 0, last_activity: null,
 };
@@ -27,7 +27,9 @@ function change(now: number, before: number): number | null {
 }
 
 /** One company's page. `companyView`: the company's own dashboard (a company
- * account), without the admin's navigation and Chakra Labs' GPU figures. */
+ * account). It shows totals only — minutes, calls, call length — and nothing
+ * that names the technology behind them (no STT/TTS/Gemini Live split, speech
+ * requests, voice pipeline or GPU figures); the API sends it no more than that. */
 export default function CompanyDetail({ id, companyView = false }: { id: number; companyView?: boolean }) {
   const { clients, clientsLoaded, packages, navigate, now } = useHub();
   const [days, setDays] = useState<7 | 30 | 90>(30);
@@ -54,6 +56,9 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
   const daily = data?.daily ?? [];
   const labels = daily.map((d) => dayLabel(d.day));
   const waiting = !data && !error;
+  // Average talk time per call (company view).
+  const avgCall = u.month_calls ? u.month_call_min / u.month_calls : 0;
+  const lastAvgCall = u.last_mtd_calls ? u.last_mtd_call_min / u.last_mtd_calls : 0;
 
   return (
     <div className="space-y-5">
@@ -109,19 +114,30 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
         <Stat
           label="Calls this month"
           loading={waiting}
-          value={compact(u.month_calls)}
-          sub={`${compact(u.month_requests)} speech requests`}
+          value={companyView ? num(u.month_calls) : compact(u.month_calls)}
+          sub={companyView ? undefined : `${compact(u.month_requests)} speech requests`}
           delta={{ ratio: change(u.month_calls, u.last_mtd_calls), label: "vs same days last month" }}
           icon={<Zap size={16} />}
         />
-        <Stat
-          label="Error rate this month"
-          loading={waiting}
-          value={pct(errorRate, 1)}
-          sub={`${num(u.month_errors)} failed · ${num(u.month_rejected)} refused at line limit`}
-          icon={<AlertTriangle size={16} />}
-          tone={errorRate >= 0.05 && u.month_requests >= 20 ? "critical" : undefined}
-        />
+        {companyView ? (
+          <Stat
+            label="Average call"
+            loading={waiting}
+            value={`${avgCall.toFixed(1)} min`}
+            sub={`${minutes(u.month_call_min)} min of calls this month`}
+            delta={lastAvgCall ? { ratio: change(avgCall, lastAvgCall), label: "vs same days last month" } : undefined}
+            icon={<Clock size={16} />}
+          />
+        ) : (
+          <Stat
+            label="Error rate this month"
+            loading={waiting}
+            value={pct(errorRate, 1)}
+            sub={`${num(u.month_errors)} failed · ${num(u.month_rejected)} refused at line limit`}
+            icon={<AlertTriangle size={16} />}
+            tone={errorRate >= 0.05 && u.month_requests >= 20 ? "critical" : undefined}
+          />
+        )}
         <Stat
           label="Usage resets in"
           loading={waiting}
@@ -136,11 +152,13 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
           <KeyValue label="Package">{client.package_name || "Essential"}</KeyValue>
           <KeyValue label="Monthly minutes">{num(quota)} min</KeyValue>
           <KeyValue label="Concurrent lines">{num(lines)}</KeyValue>
-          <KeyValue label="Voice pipeline">
-            {client.pipelines?.length
-              ? client.pipelines.map((p, i) => (i === 0 ? pipelineLabel(p) : `+ ${pipelineLabel(p)}`)).join(" ")
-              : "Not assigned (client config)"}
-          </KeyValue>
+          {!companyView && (
+            <KeyValue label="Voice pipeline">
+              {client.pipelines?.length
+                ? client.pipelines.map((p, i) => (i === 0 ? pipelineLabel(p) : `+ ${pipelineLabel(p)}`)).join(" ")
+                : "Not assigned (client config)"}
+            </KeyValue>
+          )}
           <KeyValue label="Daily talk time">
             {/* The reminder time is on the talk-time page; this line stays short. */}
             {describeLimit(client.daily_limit_minutes, null)}
@@ -160,12 +178,19 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
 
         <Card title="This month vs last month" subtitle={`First ${Math.floor(elapsedDays) + 1} days of each month`}>
           <div className="space-y-3">
-            {[
-              { label: "Minutes", now: u.month_minutes, before: u.last_mtd_minutes, fmt: minutes, upGood: true },
-              { label: "Calls", now: u.month_calls, before: u.last_mtd_calls, fmt: compact, upGood: true },
-              { label: "Speech requests", now: u.month_requests, before: u.last_mtd_requests, fmt: compact, upGood: true },
-              { label: "Failed requests", now: u.month_errors, before: u.last_mtd_errors, fmt: compact, upGood: false },
-            ].map((r) => {
+            {(companyView
+              ? [
+                  { label: "Minutes", now: u.month_minutes, before: u.last_mtd_minutes, fmt: minutes, upGood: true },
+                  { label: "Calls", now: u.month_calls, before: u.last_mtd_calls, fmt: num, upGood: true },
+                  { label: "Average call (min)", now: avgCall, before: lastAvgCall, fmt: (v: number) => v.toFixed(1), upGood: true },
+                ]
+              : [
+                  { label: "Minutes", now: u.month_minutes, before: u.last_mtd_minutes, fmt: minutes, upGood: true },
+                  { label: "Calls", now: u.month_calls, before: u.last_mtd_calls, fmt: compact, upGood: true },
+                  { label: "Speech requests", now: u.month_requests, before: u.last_mtd_requests, fmt: compact, upGood: true },
+                  { label: "Failed requests", now: u.month_errors, before: u.last_mtd_errors, fmt: compact, upGood: false },
+                ]
+            ).map((r) => {
               const ch = change(r.now, r.before);
               const good = ch != null && ((ch > 0 && r.upGood) || (ch < 0 && !r.upGood));
               return (
@@ -174,7 +199,7 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
                   <span className="tabular text-right">
                     <span className="text-ink font-medium">{r.fmt(r.now)}</span>
                     <span className="text-ink-3"> vs {r.fmt(r.before)}</span>
-                    <span className={cx("ml-2 font-medium", ch == null || ch === 0 ? "text-ink-3" : good ? "text-good" : "text-critical")}>
+                    <span className={cx("ml-2 font-medium", ch == null || Math.abs(ch) < 0.005 ? "text-ink-3" : good ? "text-good" : "text-critical")}>
                       {ch == null ? "new" : signedPct(ch)}
                     </span>
                   </span>
@@ -183,7 +208,8 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
             })}
           </div>
           <p className="text-[11px] text-ink-3 mt-3">
-            All of last month: {minutes(u.last_month_minutes)} min · {compact(u.last_month_requests)} requests
+            All of last month: {minutes(u.last_month_minutes)} min ·{" "}
+            {companyView ? `${num(u.last_month_calls)} calls` : `${compact(u.last_month_requests)} requests`}
           </p>
         </Card>
       </div>
@@ -205,8 +231,12 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         <Card
           className="xl:col-span-7"
-          title="Usage"
-          subtitle={`STT ${minutes(u.month_stt_min)} min · TTS ${minutes(u.month_tts_min)} min · Gemini Live ${minutes(u.month_live_min)} min this month`}
+          title={companyView ? "Daily usage" : "Usage"}
+          subtitle={
+            companyView
+              ? `Minutes used per day · ${minutes(u.month_minutes)} min this month`
+              : `STT ${minutes(u.month_stt_min)} min · TTS ${minutes(u.month_tts_min)} min · Gemini Live ${minutes(u.month_live_min)} min this month`
+          }
         >
           {!data ? (
             <ChartSkeleton height={230} bars={30} />
@@ -214,25 +244,46 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
             <ColumnChart
               labels={labels}
               tooltipLabels={daily.map((d) => d.day)}
-              series={[
-                { key: "stt", label: "STT", color: "var(--series-1)", values: daily.map((d) => d.stt_min) },
-                { key: "tts", label: "TTS", color: "var(--series-2)", values: daily.map((d) => d.tts_min) },
-                { key: "live", label: "Gemini Live", color: "var(--series-3)", values: daily.map((d) => d.live_min) },
-              ]}
+              series={
+                companyView
+                  ? [{ key: "minutes", label: "Minutes", color: "var(--series-1)", values: daily.map((d) => d.minutes) }]
+                  : [
+                      { key: "stt", label: "STT", color: "var(--series-1)", values: daily.map((d) => d.stt_min) },
+                      { key: "tts", label: "TTS", color: "var(--series-2)", values: daily.map((d) => d.tts_min) },
+                      { key: "live", label: "Gemini Live", color: "var(--series-3)", values: daily.map((d) => d.live_min) },
+                    ]
+              }
               unit=" min"
               height={230}
             />
           )}
         </Card>
-        <Card className="xl:col-span-5" title="Busiest hours" subtitle="When this company's callers use the line (last 30 days)">
+        <Card className="xl:col-span-5" title="Busiest hours" subtitle={companyView ? "When your callers use the line (last 30 days)" : "When this company's callers use the line (last 30 days)"}>
           {!data ? <Skeleton className="h-[230px]" /> : <Heatmap cells={data.heatmap} format={(v) => `${minutes(v)} min`} />}
         </Card>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-        <Card className={companyView ? "xl:col-span-12" : "xl:col-span-7"} title="Requests & errors" subtitle={`Last ${days} days`}>
-          <RequestsAndErrors data={data} labels={labels} />
-        </Card>
+        {companyView ? (
+          <Card className="xl:col-span-12" title="Calls per day" subtitle={`Last ${days} days · ${num(daily.reduce((a, d) => a + d.calls, 0))} calls`}>
+            {!data ? (
+              <ChartSkeleton height={200} bars={30} />
+            ) : (
+              <ColumnChart
+                labels={labels}
+                tooltipLabels={daily.map((d) => d.day)}
+                series={[{ key: "calls", label: "Calls", color: "var(--series-3)", values: daily.map((d) => d.calls) }]}
+                format={(v) => num(v)}
+                unit=" calls"
+                height={200}
+              />
+            )}
+          </Card>
+        ) : (
+          <Card className="xl:col-span-7" title="Requests & errors" subtitle={`Last ${days} days`}>
+            <RequestsAndErrors data={data} labels={labels} />
+          </Card>
+        )}
         {!companyView && (
           <div className="xl:col-span-5 space-y-4">
             <CapacityCard client={client} lines={lines} usage={u} />

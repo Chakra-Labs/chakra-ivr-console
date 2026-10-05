@@ -19,7 +19,7 @@ import { MAX_LIMIT_MINUTES, MAX_WARNING_SECONDS, formatAgentLimits, parseAgentLi
 import { ago, compact, dateOnly, dateTime } from "@/lib/format";
 import { track } from "@/lib/loading";
 import { findPackage } from "@/lib/packages";
-import { PIPELINES, formatAgentPins, parseAgentPins, pipelineLabel } from "@/lib/pipelines";
+import { PIPELINES, formatAgentPins, parseAgentPins } from "@/lib/pipelines";
 import type { Client, ConsoleAccount } from "@/lib/types";
 
 // ── shared pieces ────────────────────────────────────────────────────────────
@@ -531,9 +531,6 @@ export function AccountPage() {
       <Card title="Your licence" subtitle="Managed by Chakra Labs">
         <KeyValue label="Company">{client.company_name}</KeyValue>
         <KeyValue label="Package">{client.package_name || "Essential"}</KeyValue>
-        <KeyValue label="Voice pipeline">
-          {client.pipelines?.length ? client.pipelines.map((p, i) => (i === 0 ? pipelineLabel(p) : `+ ${pipelineLabel(p)}`)).join(" ") : "Set by your configuration"}
-        </KeyValue>
         <KeyValue label="Status">
           <Badge tone={client.is_active ? "good" : "critical"}>{client.is_active ? "Active" : "Suspended"}</Badge>
         </KeyValue>
@@ -541,7 +538,7 @@ export function AccountPage() {
           <span className="font-mono text-[12px]">{client.token_prefix ?? "chk_live_"}…</span>
         </KeyValue>
         <KeyValue label="Customer since">{dateOnly(client.created_at)}</KeyValue>
-        <p className="text-[11px] text-ink-3 mt-3">To change your package or voice pipeline, contact Chakra Labs.</p>
+        <p className="text-[11px] text-ink-3 mt-3">To change your package, contact Chakra Labs.</p>
       </Card>
       <PasswordCard />
     </div>
