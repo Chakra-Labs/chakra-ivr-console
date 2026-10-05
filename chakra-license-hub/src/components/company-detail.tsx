@@ -14,7 +14,8 @@ import { PIPELINES, formatAgentPins, parseAgentPins, pipelineLabel } from "@/lib
 import type { Client, LicenseUsage } from "@/lib/types";
 
 const EMPTY_USAGE: LicenseUsage = {
-  license_id: 0, month_minutes: 0, month_stt_min: 0, month_tts_min: 0, month_requests: 0, month_errors: 0,
+  license_id: 0, month_minutes: 0, month_stt_min: 0, month_tts_min: 0, month_live_min: 0, month_calls: 0,
+  last_mtd_calls: 0, month_requests: 0, month_errors: 0,
   month_rejected: 0, month_peak_inflight: 0, last_mtd_minutes: 0, last_mtd_requests: 0, last_mtd_errors: 0,
   last_month_minutes: 0, last_month_requests: 0, last_activity: null,
 };
@@ -94,10 +95,11 @@ export default function CompanyDetail({ id }: { id: number }) {
           tone={u.month_minutes / quota >= 0.9 ? "critical" : u.month_minutes / quota >= 0.75 ? "warning" : undefined}
         />
         <Stat
-          label="Requests this month"
+          label="Calls this month"
           loading={waiting}
-          value={compact(u.month_requests)}
-          delta={{ ratio: change(u.month_requests, u.last_mtd_requests), label: "vs same days last month" }}
+          value={compact(u.month_calls)}
+          sub={`${compact(u.month_requests)} speech requests`}
+          delta={{ ratio: change(u.month_calls, u.last_mtd_calls), label: "vs same days last month" }}
           icon={<Zap size={16} />}
         />
         <Stat
@@ -142,8 +144,9 @@ export default function CompanyDetail({ id }: { id: number }) {
         <Card title="This month vs last month" subtitle={`First ${Math.floor(elapsedDays) + 1} days of each month`}>
           <div className="space-y-3">
             {[
-              { label: "Speech minutes", now: u.month_minutes, before: u.last_mtd_minutes, fmt: minutes, upGood: true },
-              { label: "Requests", now: u.month_requests, before: u.last_mtd_requests, fmt: compact, upGood: true },
+              { label: "Minutes", now: u.month_minutes, before: u.last_mtd_minutes, fmt: minutes, upGood: true },
+              { label: "Calls", now: u.month_calls, before: u.last_mtd_calls, fmt: compact, upGood: true },
+              { label: "Speech requests", now: u.month_requests, before: u.last_mtd_requests, fmt: compact, upGood: true },
               { label: "Failed requests", now: u.month_errors, before: u.last_mtd_errors, fmt: compact, upGood: false },
             ].map((r) => {
               const ch = change(r.now, r.before);
@@ -185,8 +188,8 @@ export default function CompanyDetail({ id }: { id: number }) {
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         <Card
           className="xl:col-span-7"
-          title="Speech usage"
-          subtitle={`STT ${minutes(u.month_stt_min)} min · TTS ${minutes(u.month_tts_min)} min this month`}
+          title="Usage"
+          subtitle={`STT ${minutes(u.month_stt_min)} min · TTS ${minutes(u.month_tts_min)} min · Gemini Live ${minutes(u.month_live_min)} min this month`}
         >
           {!data ? (
             <ChartSkeleton height={230} bars={30} />
@@ -197,6 +200,7 @@ export default function CompanyDetail({ id }: { id: number }) {
               series={[
                 { key: "stt", label: "STT", color: "var(--series-1)", values: daily.map((d) => d.stt_min) },
                 { key: "tts", label: "TTS", color: "var(--series-2)", values: daily.map((d) => d.tts_min) },
+                { key: "live", label: "Gemini Live", color: "var(--series-3)", values: daily.map((d) => d.live_min) },
               ]}
               unit=" min"
               height={230}

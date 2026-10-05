@@ -27,6 +27,10 @@ export interface DailyPoint {
   tts_requests: number;
   errors: number;
   rejected: number;
+  /** Call minutes of calls that bypass the gateway (Gemini Live). */
+  live_min: number;
+  /** Finished calls on every pipeline, as chakra-ivr-core reports them. */
+  calls: number;
 }
 
 export interface HeatCell {
@@ -38,9 +42,14 @@ export interface HeatCell {
 
 export interface LicenseUsage {
   license_id: number;
+  /** Speech minutes (STT + TTS) plus the call minutes of Gemini Live calls. */
   month_minutes: number;
   month_stt_min: number;
   month_tts_min: number;
+  month_live_min: number;
+  /** Finished calls on every pipeline. */
+  month_calls: number;
+  last_mtd_calls: number;
   month_requests: number;
   month_errors: number;
   month_rejected: number;

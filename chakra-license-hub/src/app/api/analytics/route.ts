@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 
 import { currentAdmin, unauthorized } from "@/lib/auth";
 import { hasCallUsage, OFF_GATEWAY, pool, TIME_ZONE, usageSchema } from "@/lib/db";
-import type { Analytics, DailyPoint } from "@/lib/types";
+import type { Analytics, DailyPoint, HeatCell, LicenseUsage } from "@/lib/types";
 
 // Speech usage for the dashboard and the company page, from `speech_usage`
 // (one row per licence per hour, written by the speech gateway).
@@ -11,13 +11,20 @@ import type { Analytics, DailyPoint } from "@/lib/types";
 //   GET /api/analytics?days=30&license=7  one licence
 //
 // "Minutes" are speech minutes: caller audio transcribed (STT) plus agent audio
-// spoken (TTS). A licence's month totals also count the call minutes of calls
-// that bypass the gateway (Gemini Live), from `call_usage`; the daily chart and
-// heatmap stay speech only. Days and months follow Sri Lanka time.
+// spoken (TTS). Calls that bypass the gateway (Gemini Live) count their call
+// minutes instead, from `call_usage`, which also gives every licence's call
+// count on every pipeline. Days and months follow Sri Lanka time.
 
 const ALLOWED_DAYS = new Set([7, 30, 90]);
 
 const f = (v: unknown) => Number(v ?? 0) || 0;
+
+const EMPTY_USAGE: LicenseUsage = {
+  license_id: 0, month_minutes: 0, month_stt_min: 0, month_tts_min: 0, month_live_min: 0, month_calls: 0,
+  last_mtd_calls: 0, month_requests: 0, month_errors: 0, month_rejected: 0, month_peak_inflight: 0,
+  last_mtd_minutes: 0, last_mtd_requests: 0, last_mtd_errors: 0, last_month_minutes: 0, last_month_requests: 0,
+  last_activity: null,
+};
 
 export async function GET(request: NextRequest) {
   if (!(await currentAdmin())) return unauthorized();
@@ -63,7 +70,7 @@ export async function GET(request: NextRequest) {
     const peak = schema.extended ? "peak_inflight" : "0";
 
     const withCalls = await hasCallUsage();
-    const [daily, heat, perLicense, lastSeen, calls] = await Promise.all([
+    const [daily, heat, perLicense, lastSeen, calls, callsDaily, callsHeat] = await Promise.all([
       pool.query(
         `SELECT to_char((hour AT TIME ZONE $1)::date, 'YYYY-MM-DD') AS day,
                 SUM(stt_seconds)::float8 / 60 AS stt_min, SUM(tts_seconds)::float8 / 60 AS tts_min,
@@ -112,7 +119,8 @@ export async function GET(request: NextRequest) {
          WHERE ($1::int IS NULL OR license_id = $1) GROUP BY license_id`,
         [license],
       ),
-      // Call minutes of calls that bypass the gateway (see OFF_GATEWAY).
+      // From call_usage: every finished call on every pipeline, and the call
+      // minutes of the calls that bypass the gateway (see OFF_GATEWAY).
       withCalls
         ? pool.query(
             `WITH b AS (
@@ -120,31 +128,64 @@ export async function GET(request: NextRequest) {
                       (($1::timestamptz AT TIME ZONE $2) - interval '1 month') AT TIME ZONE $2 AS lm
              )
              SELECT license_id,
-               COALESCE(SUM(call_seconds) FILTER (WHERE hour >= b.m), 0)::float8 / 60 AS month_min,
-               COALESCE(SUM(call_seconds) FILTER (WHERE hour >= b.lm AND hour < b.lm + (now() - b.m)), 0)::float8 / 60 AS last_mtd_min,
-               COALESCE(SUM(call_seconds) FILTER (WHERE hour >= b.lm AND hour < b.m), 0)::float8 / 60 AS last_month_min,
+               COALESCE(SUM(call_seconds) FILTER (WHERE ${OFF_GATEWAY} AND hour >= b.m), 0)::float8 / 60 AS month_min,
+               COALESCE(SUM(call_seconds) FILTER (WHERE ${OFF_GATEWAY} AND hour >= b.lm AND hour < b.lm + (now() - b.m)), 0)::float8 / 60 AS last_mtd_min,
+               COALESCE(SUM(call_seconds) FILTER (WHERE ${OFF_GATEWAY} AND hour >= b.lm AND hour < b.m), 0)::float8 / 60 AS last_month_min,
+               COALESCE(SUM(calls) FILTER (WHERE hour >= b.m), 0)::int AS month_calls,
+               COALESCE(SUM(calls) FILTER (WHERE hour >= b.lm AND hour < b.lm + (now() - b.m)), 0)::int AS last_mtd_calls,
                MAX(hour) AS last_activity
              FROM call_usage, b
-             WHERE ${OFF_GATEWAY} AND ($3::int IS NULL OR license_id = $3)
+             WHERE ($3::int IS NULL OR license_id = $3)
              GROUP BY license_id`,
             [cal.month_start, TIME_ZONE, license],
+          )
+        : null,
+      withCalls
+        ? pool.query(
+            `SELECT to_char((hour AT TIME ZONE $1)::date, 'YYYY-MM-DD') AS day,
+                    COALESCE(SUM(call_seconds) FILTER (WHERE ${OFF_GATEWAY}), 0)::float8 / 60 AS live_min,
+                    SUM(calls)::int AS calls
+             FROM call_usage
+             WHERE hour >= ($2::date)::timestamp AT TIME ZONE $1 AND ($3::int IS NULL OR license_id = $3)
+             GROUP BY 1`,
+            [TIME_ZONE, firstDay, license],
+          )
+        : null,
+      withCalls
+        ? pool.query(
+            `SELECT EXTRACT(ISODOW FROM hour AT TIME ZONE $1)::int AS dow,
+                    EXTRACT(HOUR FROM hour AT TIME ZONE $1)::int AS hour,
+                    SUM(call_seconds)::float8 / 60 AS minutes
+             FROM call_usage
+             WHERE ${OFF_GATEWAY} AND hour >= now() - interval '30 days' AND ($2::int IS NULL OR license_id = $2)
+             GROUP BY 1, 2`,
+            [TIME_ZONE, license],
           )
         : null,
     ]);
 
     const seen = new Map(lastSeen.rows.map((r) => [Number(r.license_id), r.last_activity as Date]));
-    const offGateway = new Map<number, { month: number; lastMtd: number; lastMonth: number }>();
+    const callsBy = new Map<number, { month: number; lastMtd: number; lastMonth: number; calls: number; lastMtdCalls: number }>();
     for (const r of calls?.rows ?? []) {
       const id = Number(r.license_id);
-      offGateway.set(id, { month: f(r.month_min), lastMtd: f(r.last_mtd_min), lastMonth: f(r.last_month_min) });
+      callsBy.set(id, {
+        month: f(r.month_min),
+        lastMtd: f(r.last_mtd_min),
+        lastMonth: f(r.last_month_min),
+        calls: f(r.month_calls),
+        lastMtdCalls: f(r.last_mtd_calls),
+      });
       const at = r.last_activity as Date | null;
       if (at && (!seen.has(id) || at > seen.get(id)!)) seen.set(id, at);
     }
-    const licenses = perLicense.rows.map((r) => ({
+    const licenses: LicenseUsage[] = perLicense.rows.map((r) => ({
       license_id: Number(r.license_id),
       month_minutes: f(r.month_minutes),
       month_stt_min: f(r.month_stt_min),
       month_tts_min: f(r.month_tts_min),
+      month_live_min: 0,
+      month_calls: 0,
+      last_mtd_calls: 0,
       month_requests: f(r.month_requests),
       month_errors: f(r.month_errors),
       month_rejected: f(r.month_rejected),
@@ -156,23 +197,33 @@ export async function GET(request: NextRequest) {
       last_month_requests: f(r.last_month_requests),
       last_activity: seen.get(Number(r.license_id))?.toISOString() ?? null,
     }));
-    // Licences with older activity (or off-gateway calls only) still get a row.
+    // Licences with older activity (or calls only) still get a row.
     for (const [id, at] of seen) {
       if (!licenses.some((l) => l.license_id === id)) {
-        licenses.push({
-          license_id: id, month_minutes: 0, month_stt_min: 0, month_tts_min: 0, month_requests: 0,
-          month_errors: 0, month_rejected: 0, month_peak_inflight: 0, last_mtd_minutes: 0,
-          last_mtd_requests: 0, last_mtd_errors: 0, last_month_minutes: 0, last_month_requests: 0,
-          last_activity: at.toISOString(),
-        });
+        licenses.push({ ...EMPTY_USAGE, license_id: id, last_activity: at.toISOString() });
       }
     }
     for (const l of licenses) {
-      const c = offGateway.get(l.license_id);
+      const c = callsBy.get(l.license_id);
       if (!c) continue;
+      l.month_live_min = c.month;
       l.month_minutes += c.month;
       l.last_mtd_minutes += c.lastMtd;
       l.last_month_minutes += c.lastMonth;
+      l.month_calls = c.calls;
+      l.last_mtd_calls = c.lastMtdCalls;
+    }
+
+    const callDays = new Map((callsDaily?.rows ?? []).map((r) => [r.day as string, r]));
+    const heatmap = new Map<string, HeatCell>();
+    for (const r of heat.rows) {
+      heatmap.set(`${r.dow}-${r.hour}`, { dow: f(r.dow), hour: f(r.hour), minutes: f(r.minutes), requests: f(r.requests) });
+    }
+    for (const r of callsHeat?.rows ?? []) {
+      const key = `${r.dow}-${r.hour}`;
+      const cell = heatmap.get(key) ?? { dow: f(r.dow), hour: f(r.hour), minutes: 0, requests: 0 };
+      cell.minutes += f(r.minutes);
+      heatmap.set(key, cell);
     }
 
     return Response.json({
@@ -188,9 +239,14 @@ export async function GET(request: NextRequest) {
           tts_requests: f(r.tts_requests),
           errors: f(r.errors),
           rejected: f(r.rejected),
+          live_min: 0,
+          calls: 0,
         })),
-      ),
-      heatmap: heat.rows.map((r) => ({ dow: f(r.dow), hour: f(r.hour), minutes: f(r.minutes), requests: f(r.requests) })),
+      ).map((d) => {
+        const c = callDays.get(d.day);
+        return c ? { ...d, live_min: f(c.live_min), calls: f(c.calls) } : d;
+      }),
+      heatmap: [...heatmap.values()],
       licenses,
     } satisfies Analytics);
   } catch (error) {
@@ -206,7 +262,7 @@ function fillDays(first: string, days: number, rows: DailyPoint[]): DailyPoint[]
   const out: DailyPoint[] = [];
   for (let i = 0; i < days; i++) {
     const day = new Date(Date.UTC(y, m - 1, d + i)).toISOString().slice(0, 10);
-    out.push(byDay.get(day) ?? { day, stt_min: 0, tts_min: 0, stt_requests: 0, tts_requests: 0, errors: 0, rejected: 0 });
+    out.push(byDay.get(day) ?? { day, stt_min: 0, tts_min: 0, stt_requests: 0, tts_requests: 0, errors: 0, rejected: 0, live_min: 0, calls: 0 });
   }
   return out;
 }

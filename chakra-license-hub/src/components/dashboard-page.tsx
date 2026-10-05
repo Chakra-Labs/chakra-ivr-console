@@ -34,11 +34,16 @@ export default function DashboardPage() {
 
   const usage = useMemo(() => new Map((data?.licenses ?? []).map((l) => [l.license_id, l])), [data]);
   const sum = (k: keyof LicenseUsage) => (data?.licenses ?? []).reduce((a, l) => a + (Number(l[k]) || 0), 0);
+  // Minutes = speech minutes on the Chakra fleet + call minutes of Gemini Live calls.
   const monthMinutes = sum("month_minutes");
+  const speechMinutes = sum("month_stt_min") + sum("month_tts_min");
+  const liveMinutes = sum("month_live_min");
+  const monthCalls = sum("month_calls");
   const monthRequests = sum("month_requests");
   const monthErrors = sum("month_errors");
-  const activeCompanies = (data?.licenses ?? []).filter((l) => l.month_requests > 0).length;
-  const lastActiveCompanies = (data?.licenses ?? []).filter((l) => l.last_mtd_requests > 0).length;
+  // Active = took a call (any pipeline) or used the speech fleet this month.
+  const activeCompanies = (data?.licenses ?? []).filter((l) => l.month_calls > 0 || l.month_requests > 0).length;
+  const lastActiveCompanies = (data?.licenses ?? []).filter((l) => l.last_mtd_calls > 0 || l.last_mtd_requests > 0).length;
   const { elapsedDays, fraction } = monthProgress(data);
 
   const healthyGpus = fleet.nodes.filter((n) => fleet.assessments.get(n.id)?.status === "healthy" || fleet.assessments.get(n.id)?.status === "peak").length;
@@ -95,17 +100,19 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <Stat
-          label="Speech minutes this month"
+          label="Minutes this month"
           loading={waiting}
           value={minutes(monthMinutes)}
+          sub={`${minutes(speechMinutes)} Chakra speech · ${minutes(liveMinutes)} Gemini Live`}
           delta={{ ratio: change(monthMinutes, sum("last_mtd_minutes")), label: "vs same days last month" }}
           icon={<Clock size={16} />}
         />
         <Stat
-          label="Requests this month"
+          label="Calls this month"
           loading={waiting}
-          value={compact(monthRequests)}
-          sub={monthRequests ? `${pct(monthErrors / monthRequests, 1)} failed` : "No requests yet"}
+          value={compact(monthCalls)}
+          sub={monthRequests ? `${compact(monthRequests)} speech requests · ${pct(monthErrors / monthRequests, 1)} failed` : "No speech requests yet"}
+          delta={{ ratio: change(monthCalls, sum("last_mtd_calls")), label: "vs same days last month" }}
           icon={<Zap size={16} />}
         />
         <Stat
@@ -127,13 +134,14 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-        <Card className="xl:col-span-8" title="Daily speech usage" subtitle={`Minutes of caller audio (STT) and agent speech (TTS), last ${days} days`}>
+        <Card className="xl:col-span-8" title="Daily usage" subtitle={`Caller audio (STT) and agent speech (TTS) on the Chakra fleet, and Gemini Live call minutes, last ${days} days`}>
           {!data ? <ChartSkeleton height={240} bars={30} /> : <ColumnChart
             labels={labels}
             tooltipLabels={(data?.daily ?? []).map((d) => d.day)}
             series={[
               { key: "stt", label: "STT", color: "var(--series-1)", values: (data?.daily ?? []).map((d) => d.stt_min) },
               { key: "tts", label: "TTS", color: "var(--series-2)", values: (data?.daily ?? []).map((d) => d.tts_min) },
+              { key: "live", label: "Gemini Live", color: "var(--series-3)", values: (data?.daily ?? []).map((d) => d.live_min) },
             ]}
             format={(v) => v.toLocaleString("en-US", { maximumFractionDigits: 1 })}
             unit=" min"
@@ -144,7 +152,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card title="Top companies" subtitle="Speech minutes this month">
+        <Card title="Top companies" subtitle="Minutes this month">
           {!data ? <LinesSkeleton rows={5} /> : <BarList
             items={top.map(({ c, u }) => ({
               key: c.id,
@@ -218,7 +226,7 @@ export default function DashboardPage() {
         <Card className="xl:col-span-7" title="Requests & errors" subtitle={`STT and TTS requests per day, last ${days} days`}>
           <RequestsAndErrors data={data} labels={labels} />
         </Card>
-        <Card className="xl:col-span-5" title="Busiest hours" subtitle="Speech minutes by day and hour, last 30 days">
+        <Card className="xl:col-span-5" title="Busiest hours" subtitle="Minutes by day and hour, last 30 days">
           {!data ? <Skeleton className="h-[230px]" /> : <Heatmap cells={data.heatmap} format={(v) => `${minutes(v)} min`} />}
         </Card>
       </div>
@@ -238,8 +246,9 @@ export default function DashboardPage() {
             </thead>
             <tbody className="tabular">
               {[
-                { label: "Speech minutes", now: monthMinutes, before: sum("last_mtd_minutes"), fmt: minutes, upGood: true },
-                { label: "Requests", now: monthRequests, before: sum("last_mtd_requests"), fmt: compact, upGood: true },
+                { label: "Minutes", now: monthMinutes, before: sum("last_mtd_minutes"), fmt: minutes, upGood: true },
+                { label: "Calls", now: monthCalls, before: sum("last_mtd_calls"), fmt: compact, upGood: true },
+                { label: "Speech requests", now: monthRequests, before: sum("last_mtd_requests"), fmt: compact, upGood: true },
                 { label: "Failed requests", now: monthErrors, before: sum("last_mtd_errors"), fmt: compact, upGood: false },
                 { label: "Active companies", now: activeCompanies, before: lastActiveCompanies, fmt: (v: number) => String(v), upGood: true },
               ].map((r) => {
@@ -272,7 +281,8 @@ export default function DashboardPage() {
             </div>
             <div>
               <div className="text-[11px] text-ink-3 mb-1">Per speech minute</div>
-              <div className="text-[24px] font-semibold text-ink leading-none">{monthMinutes > 0 ? money(costSoFar / monthMinutes, 3) : "–"}</div>
+              {/* Only Chakra speech runs on the GPUs; Gemini Live minutes do not. */}
+              <div className="text-[24px] font-semibold text-ink leading-none">{speechMinutes > 0 ? money(costSoFar / speechMinutes, 3) : "–"}</div>
               <div className="text-[11px] text-ink-3 mt-1">this month so far</div>
             </div>
           </div>
