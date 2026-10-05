@@ -2,8 +2,8 @@
 
 // IVR Console's shell: sidebar, header, routing (#hash), shared data.
 // Signing in is enforced on the server (proxy.ts + every API route). An admin
-// sees everything; a company account sees its own dashboard and Manage licence
-// only (the API refuses it anything else, whatever this page shows).
+// sees everything; a company account sees its own dashboard, talk-time limit
+// and account only (the API refuses it anything else, whatever this page shows).
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -17,8 +17,8 @@ import FleetPage from "@/components/fleet-page";
 import GpuPage from "@/components/gpu-page";
 import { Header } from "@/components/header";
 import { HubContext, licenseApi, parseRoute, routeHash, type Hub, type Route } from "@/components/hub-context";
-import { Activity, Box, Building, Check, Copy, Key, LayoutDashboard, Server, Settings, X } from "@/components/icons";
-import ManagePage from "@/components/manage-page";
+import { Activity, Box, Building, Check, Clock, Copy, Key, LayoutDashboard, Lock, Server, Settings, X } from "@/components/icons";
+import LicenceSettingsPage, { AccountPage, TalkTimePage } from "@/components/settings-pages";
 import NewLicensePage from "@/components/new-license-page";
 import PackagesPage from "@/components/packages-page";
 import { Button, Spinner, cx } from "@/components/ui";
@@ -33,11 +33,14 @@ const TITLES: Record<Route["page"], { title: string; subtitle: string }> = {
   packages: { title: "Packages", subtitle: "Monthly minutes and lines per subscription package" },
   gpus: { title: "GPU performance", subtitle: "Health, traffic, latency and resources of every GPU" },
   fleet: { title: "GPU fleet", subtitle: "Add, deploy, drain and remove GPU servers" },
-  manage: { title: "Manage licences", subtitle: "Each company's licence, daily talk time and IVR Console sign-in" },
+  manage: { title: "Licence settings", subtitle: "Package, voice pipeline, talk time, sign-in and key, one company at a time" },
+  // Company-account pages (titled in the shell).
+  limits: { title: "Talk-time limit", subtitle: "" },
+  account: { title: "Account", subtitle: "" },
 };
 
 /** Pages a company account may open; anything else shows its dashboard. */
-const COMPANY_PAGES: Route["page"][] = ["dashboard", "manage"];
+const COMPANY_PAGES: Route["page"][] = ["dashboard", "limits", "account"];
 
 export default function App() {
   const router = useRouter();
@@ -197,9 +200,11 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
   const page: Route = isCompany && !COMPANY_PAGES.includes(route.page) ? { page: "dashboard" } : route;
   const company = page.page === "company" ? clients.find((c) => c.id === page.id) : undefined;
   const heading = isCompany
-    ? page.page === "manage"
-      ? { title: "Manage licence", subtitle: "Your daily talk time, licence and sign-in" }
-      : { title: "Dashboard", subtitle: `${viewer.companyName}: calls, minutes and usage` }
+    ? page.page === "limits"
+      ? { title: "Talk-time limit", subtitle: "How long each caller may talk per day" }
+      : page.page === "account"
+        ? { title: "Account", subtitle: "Your licence and sign-in" }
+        : { title: "Dashboard", subtitle: `${viewer.companyName}: calls, minutes and usage` }
     : page.page === "company"
       ? { title: company?.company_name ?? "Company", subtitle: company ? `${company.package_name || "Essential"} package` : "" }
       : TITLES[page.page];
@@ -258,14 +263,15 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
               {isCompany ? (
                 <>
                   {page.page === "dashboard" && <CompanyDetail id={viewer.licenseId} companyView />}
-                  {page.page === "manage" && <ManagePage />}
+                  {page.page === "limits" && <TalkTimePage />}
+                  {page.page === "account" && <AccountPage />}
                 </>
               ) : (
                 <>
                   {page.page === "dashboard" && <DashboardPage />}
                   {page.page === "companies" && <CompaniesPage />}
                   {page.page === "company" && <CompanyDetail id={page.id} />}
-                  {page.page === "manage" && <ManagePage id={page.id} />}
+                  {page.page === "manage" && <LicenceSettingsPage id={page.id} />}
                   {page.page === "new" && <NewLicensePage />}
                   {page.page === "packages" && <PackagesPage />}
                   {page.page === "gpus" && <GpuPage node={page.node} />}
@@ -292,7 +298,13 @@ function Sidebar({ route, viewer, open, onClose }: { route: Route; viewer: Viewe
   type Group = { label: string; items: { page: Route["page"]; label: string; icon: ReactNode; badge?: ReactNode }[] };
   const companyGroups: Group[] = [
     { label: "Overview", items: [{ page: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={16} /> }] },
-    { label: "Customers", items: [{ page: "manage", label: "Manage licence", icon: <Settings size={16} /> }] },
+    {
+      label: "Settings",
+      items: [
+        { page: "limits", label: "Talk-time limit", icon: <Clock size={16} /> },
+        { page: "account", label: "Account", icon: <Lock size={16} /> },
+      ],
+    },
   ];
   const adminGroups: Group[] = [
     { label: "Overview", items: [{ page: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={16} /> }] },
@@ -300,7 +312,7 @@ function Sidebar({ route, viewer, open, onClose }: { route: Route; viewer: Viewe
       label: "Customers",
       items: [
         { page: "companies", label: "Companies", icon: <Building size={16} /> },
-        { page: "manage", label: "Manage licences", icon: <Settings size={16} /> },
+        { page: "manage", label: "Licence settings", icon: <Settings size={16} /> },
         { page: "packages", label: "Packages", icon: <Box size={16} /> },
       ],
     },

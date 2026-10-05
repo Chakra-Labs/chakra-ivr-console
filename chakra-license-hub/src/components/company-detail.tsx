@@ -84,9 +84,15 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
             detail={data ? `${minutes(u.month_minutes)} / ${compact(quota)} min` : "…"}
           />
         </div>
-        <Button onClick={() => navigate({ page: "manage", id: client.id })}>
-          <Settings size={14} /> Manage licence
-        </Button>
+        {companyView ? (
+          <Button onClick={() => navigate({ page: "limits" })}>
+            <Clock size={14} /> Talk-time limit
+          </Button>
+        ) : (
+          <Button onClick={() => navigate({ page: "manage", id: client.id })}>
+            <Settings size={14} /> Licence settings
+          </Button>
+        )}
       </section>
 
       <ErrorBanner message={error} />
@@ -136,7 +142,8 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
               : "Not assigned (client config)"}
           </KeyValue>
           <KeyValue label="Daily talk time">
-            {describeLimit(client.daily_limit_minutes, client.limit_warning_seconds)}
+            {/* The reminder time is on the talk-time page; this line stays short. */}
+            {describeLimit(client.daily_limit_minutes, null)}
             {Object.keys(client.agent_daily_limits ?? {}).length > 0 && " · some agents differ"}
           </KeyValue>
           <KeyValue label="Status">{client.is_active ? "Active" : "Suspended"}</KeyValue>

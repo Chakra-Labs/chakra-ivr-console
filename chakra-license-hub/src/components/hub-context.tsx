@@ -16,7 +16,9 @@ export type Route =
   | { page: "packages" }
   | { page: "gpus"; node?: number }
   | { page: "fleet" }
-  | { page: "manage"; id?: number };
+  | { page: "manage"; id?: number }
+  | { page: "limits" }
+  | { page: "account" };
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#\/?/, "");
@@ -26,7 +28,7 @@ export function parseRoute(hash: string): Route {
   if (gpu) return { page: "gpus", node: Number(gpu[1]) };
   const manage = /^manage\/(\d+)$/.exec(h);
   if (manage) return { page: "manage", id: Number(manage[1]) };
-  if (["companies", "new", "packages", "gpus", "fleet", "manage"].includes(h)) return { page: h } as Route;
+  if (["companies", "new", "packages", "gpus", "fleet", "manage", "limits", "account"].includes(h)) return { page: h } as Route;
   return { page: "dashboard" };
 }
 
