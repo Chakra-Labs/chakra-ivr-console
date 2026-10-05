@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useFleet } from "./fleet-context";
 import { AlertOctagon, AlertTriangle, Bell, CheckCircle, ChevronRight, LogOut, Menu } from "./icons";
 import { useLoading } from "@/lib/loading";
+import type { ViewerInfo } from "@/lib/types";
 import { cx } from "./ui";
 
 // Kept for when search, the theme switch and Ask AI are built (removed from
@@ -14,14 +15,14 @@ import { cx } from "./ui";
 export function Header({
   title,
   subtitle,
-  adminEmail,
+  viewer,
   onLogout,
   onOpenGpu,
   onMenu,
 }: {
   title: string;
   subtitle?: React.ReactNode;
-  adminEmail: string;
+  viewer: ViewerInfo;
   onLogout: () => void;
   onOpenGpu: (node?: number) => void;
   onMenu: () => void;
@@ -57,14 +58,15 @@ export function Header({
           Ask AI
         </button>
         */}
-        <NotificationBell onOpenGpu={onOpenGpu} />
+        {/* GPU alerts are Chakra Labs' own, not a company's. */}
+        {viewer.role === "admin" && <NotificationBell onOpenGpu={onOpenGpu} />}
         <div className="hidden sm:flex items-center gap-2.5 pl-3 ml-1 border-l border-line">
           <div className="w-8 h-8 rounded-full bg-panel-3 border border-line-strong flex items-center justify-center text-[12px] font-semibold text-ink-2 uppercase">
-            {adminEmail ? adminEmail[0] : "A"}
+            {viewer.role === "company" ? viewer.companyName[0] : viewer.email[0]}
           </div>
           <div className="hidden lg:block leading-tight">
-            <div className="text-[12px] font-medium text-ink">Administrator</div>
-            <div className="text-[11px] text-ink-3">{adminEmail}</div>
+            <div className="text-[12px] font-medium text-ink">{viewer.role === "company" ? viewer.companyName : "Administrator"}</div>
+            <div className="text-[11px] text-ink-3">{viewer.email}</div>
           </div>
         </div>
         <button

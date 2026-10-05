@@ -1,6 +1,21 @@
 // Shapes the API routes return. Fleet shapes mirror chakra-gpu-fleet's
 // controller (/fleet/nodes, /fleet/capacity, /fleet/metrics).
 
+/** Who is signed in (GET /api/auth/me). */
+export type ViewerInfo =
+  | { role: "admin"; email: string }
+  | { role: "company"; email: string; licenseId: number; companyName: string };
+
+/** A company's IVR Console sign-in (GET /api/console-users). */
+export interface ConsoleAccount {
+  license_id: number;
+  email: string;
+  is_active: boolean;
+  created_at: string;
+  password_changed_at: string;
+  last_login_at: string | null;
+}
+
 export interface Client {
   id: number;
   company_name: string;

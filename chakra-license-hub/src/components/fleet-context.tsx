@@ -48,7 +48,8 @@ const FleetContext = createContext<FleetState | null>(null);
 const LIVE_MS = 30_000;
 const METRICS_MS = 60_000;
 
-export function FleetProvider({ children }: { children: React.ReactNode }) {
+/** `enabled` false (a company account) never asks the fleet: it stays empty. */
+export function FleetProvider({ children, enabled = true }: { children: React.ReactNode; enabled?: boolean }) {
   const [nodes, setNodes] = useState<FleetNode[]>([]);
   const [capacity, setCapacity] = useState<Capacity | null>(null);
   const [metrics, setMetrics] = useState<FleetMetrics | null>(null);
@@ -86,6 +87,7 @@ export function FleetProvider({ children }: { children: React.ReactNode }) {
   }, [refreshLive, refreshMetrics]);
 
   useEffect(() => {
+    if (!enabled) return;
     const first = setTimeout(refresh, 0);
     const live = setInterval(() => refreshLive(true), LIVE_MS);
     const met = setInterval(() => refreshMetrics(true), METRICS_MS);
@@ -94,7 +96,7 @@ export function FleetProvider({ children }: { children: React.ReactNode }) {
       clearInterval(live);
       clearInterval(met);
     };
-  }, [refresh, refreshLive, refreshMetrics]);
+  }, [enabled, refresh, refreshLive, refreshMetrics]);
 
   const value = useMemo<FleetState>(() => {
     const assessments = new Map<number, Assessment>();

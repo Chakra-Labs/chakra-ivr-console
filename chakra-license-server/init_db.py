@@ -46,6 +46,22 @@ PIPELINE_COLUMNS = (
 )
 
 
+# Added 2026-10-05: IVR Console sign-ins for companies, one per licence (the hub
+# also creates this on first use; see chakra-license-hub/src/lib/console-users.ts).
+CONSOLE_USERS = """
+CREATE TABLE IF NOT EXISTS console_users (
+    id                  SERIAL PRIMARY KEY,
+    license_id          INTEGER NOT NULL UNIQUE REFERENCES licenses(id) ON DELETE CASCADE,
+    email               TEXT NOT NULL UNIQUE,
+    password_hash       TEXT NOT NULL,
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    password_changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_login_at       TIMESTAMPTZ
+)
+"""
+
+
 async def init_db() -> None:
     url = os.getenv("DATABASE_URL", "").strip()
     if not url:
@@ -55,6 +71,7 @@ async def init_db() -> None:
         await conn.execute(SCHEMA)
         for statement in PIPELINE_COLUMNS:
             await conn.execute(statement)
+        await conn.execute(CONSOLE_USERS)
         # Only the additive migration runs automatically; 002 (drop plaintext
         # keys) is irreversible and run by hand once hashed lookups are live.
         for path in MIGRATIONS:

@@ -2,6 +2,8 @@ import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 
 import { adminUsers } from "@/lib/auth";
+import { byEmail, passwordVersion } from "@/lib/console-users";
+import { pool } from "@/lib/db";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { createSession, SESSION_COOKIE, SESSION_MAX_AGE } from "@/lib/session";
 
@@ -33,7 +35,7 @@ function recordFailure(ip: string): void {
 }
 
 // Hash compared against when the email is unknown, so a wrong email and a wrong
-// password take the same time (no telling which admin emails exist).
+// password take the same time (no telling which emails have an account).
 const decoyHash = hashPassword("decoy-password-never-valid");
 
 export async function POST(req: NextRequest) {
@@ -52,8 +54,17 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Invalid request" }, { status: 400 });
   }
 
-  const users = adminUsers();
-  const stored = users.get(email);
+  // Admins first (ADMIN_USERS), then company accounts (one per licence).
+  const adminHash = adminUsers().get(email);
+  let company: Awaited<ReturnType<typeof byEmail>> = null;
+  if (!adminHash && pool && email) {
+    try {
+      company = await byEmail(email);
+    } catch (error) {
+      console.error("Company account lookup failed:", error);
+    }
+  }
+  const stored = adminHash ?? (company?.is_active ? company.password_hash : undefined);
   const ok = await verifyPassword(password, stored ?? (await decoyHash));
   if (!stored || !ok || password.length > 256) {
     recordFailure(ip);
@@ -61,15 +72,21 @@ export async function POST(req: NextRequest) {
   }
 
   failures.delete(ip);
+  const session = adminHash
+    ? await createSession(email)
+    : await createSession(email, { uid: company!.id, pv: passwordVersion(company!) });
+  if (!adminHash) {
+    pool!.query("UPDATE console_users SET last_login_at = now() WHERE id = $1", [company!.id]).catch(() => {});
+  }
   // Secure whenever the browser is on HTTPS (Caddy sets X-Forwarded-Proto in
   // production); a plain-http dev server would otherwise never get it back.
   const https = req.nextUrl.protocol === "https:" || req.headers.get("x-forwarded-proto") === "https";
-  (await cookies()).set(SESSION_COOKIE, await createSession(email), {
+  (await cookies()).set(SESSION_COOKIE, session, {
     httpOnly: true,
     secure: https,
     sameSite: "strict",
     path: "/",
     maxAge: SESSION_MAX_AGE,
   });
-  return Response.json({ email });
+  return Response.json({ email, role: adminHash ? "admin" : "company" });
 }

@@ -4,6 +4,11 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Lock } from "@/components/icons";
+import { Button, Spinner, inputClass } from "@/components/ui";
+
+// One sign-in for Chakra Labs admins and for company accounts: the server
+// decides which (api/auth/login), and the console shows each what it may see.
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -35,70 +40,63 @@ export default function LoginPage() {
   };
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center font-sans relative overflow-hidden z-0 bg-cover bg-center"
-      style={{ backgroundImage: "url('/blue-wave-black.jpg')" }}
-    >
-      <div className="absolute inset-0 bg-black/40 -z-10" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-500/[0.15] rounded-full blur-[120px] pointer-events-none -z-10" />
-      <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-[#00ebfb]/[0.1] rounded-full blur-[120px] pointer-events-none -z-10" />
-
-      <div className="w-full max-w-[420px] p-8 relative z-10">
-        <div className="flex justify-center mb-10">
-          <Image src="/chakra-labs-logo.png" alt="Chakra Labs" width={220} height={64} className="w-auto h-16 object-contain drop-shadow-2xl" priority />
+    <div className="min-h-viewport bg-canvas text-ink flex flex-col items-center justify-center px-4 py-10">
+      <div className="w-full max-w-[400px]">
+        <div className="flex flex-col items-center mb-8">
+          <Image src="/chakra-labs-logo.png" alt="Chakra Labs" width={200} height={56} className="w-auto h-12 object-contain" priority />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-ink-3 mt-2">IVR Console</span>
         </div>
 
-        <div className="bg-[#0f0e13]/80 backdrop-blur-md border border-white/5 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-[#00ebfb] to-indigo-500" />
-
-          <h2 className="text-2xl font-bold text-white mb-2 text-center">Sign in to Chakra Console</h2>
-          <p className="text-zinc-500 text-[13px] text-center mb-8">Enter your admin credentials to access the hub.</p>
+        <div className="bg-panel border border-line rounded-2xl p-7 shadow-2xl">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-panel-3 border border-line flex items-center justify-center text-accent shrink-0">
+              <Lock size={17} />
+            </div>
+            <div>
+              <h1 className="text-[17px] font-semibold text-ink leading-tight">Sign in</h1>
+              <p className="text-[12px] text-ink-3">With the account Chakra Labs gave you</p>
+            </div>
+          </div>
 
           {loginError && (
-            <div className="mb-5 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[13px] text-center font-medium">
+            <div role="alert" className="mb-5 px-3 py-2.5 rounded-lg bg-critical/10 border border-critical/30 text-critical text-[13px]">
               {loginError}
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div className="space-y-2">
-              <label className="text-[12px] font-medium text-zinc-400 ml-1">Email Address</label>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor="login-email">Email</label>
               <input
+                id="login-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="username"
-                className="w-full px-4 py-3 bg-[#15141a] border border-white/5 rounded-xl focus:outline-none focus:border-[#00ebfb]/50 text-white text-[14px] transition-all"
+                autoFocus
+                className={inputClass}
               />
             </div>
-
-            <div className="space-y-2">
-              <label className="text-[12px] font-medium text-zinc-400 ml-1">Password</label>
+            <div>
+              <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor="login-password">Password</label>
               <input
+                id="login-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 autoComplete="current-password"
-                placeholder="••••••••"
-                className="w-full px-4 py-3 bg-[#15141a] border border-white/5 rounded-xl focus:outline-none focus:border-[#00ebfb]/50 text-white text-[14px] transition-all"
+                className={inputClass}
               />
             </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3.5 mt-4 bg-[#00ebfb] text-black hover:bg-[#00ebfb]/90 rounded-xl font-bold transition-all shadow-[0_0_20px_rgba(0,235,251,0.2)] text-[14px] flex justify-center items-center gap-2 disabled:opacity-50"
-            >
-              {loading ? "Signing in…" : "Sign in"}
-            </button>
+            <Button type="submit" variant="primary" disabled={loading} className="w-full h-10 mt-2">
+              {loading && <Spinner size={14} />} {loading ? "Signing in…" : "Sign in"}
+            </Button>
           </form>
         </div>
 
-        <p className="text-center text-zinc-600 text-[11px] mt-8 font-medium tracking-wide">
-          SECURE ACCESS • CHAKRA CONSOLE
-        </p>
+        <p className="text-center text-[11px] text-ink-3 mt-6">Chakra Labs · IVR Console</p>
       </div>
     </div>
   );

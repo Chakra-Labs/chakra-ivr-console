@@ -1,10 +1,10 @@
 import type { NextRequest } from "next/server";
 
-import { currentAdmin, unauthorized } from "@/lib/auth";
+import { currentViewer, forbidden, unauthorized } from "@/lib/auth";
 
 // The GPU Fleet tab talks to the fleet controller through this route, so the
 // controller's ADMIN_API_TOKEN stays on the server and only signed-in admins
-// reach it. Only the operations the UI uses are let through.
+// reach it (never company accounts). Only the operations the UI uses are let through.
 //
 //   FLEET_CONTROLLER_URL   e.g. http://controller:8081 (the compose network)
 //   FLEET_ADMIN_TOKEN      the controller's ADMIN_API_TOKEN
@@ -24,7 +24,10 @@ const ALLOWED: [string, RegExp][] = [
 ];
 
 async function forward(request: NextRequest, ctx: RouteContext<"/api/fleet/[...path]">) {
-  if (!(await currentAdmin())) return unauthorized();
+  const viewer = await currentViewer();
+  if (!viewer) return unauthorized();
+  // The GPU fleet is Chakra Labs' own: never shown to a company account.
+  if (viewer.role !== "admin") return forbidden();
 
   const base = process.env.FLEET_CONTROLLER_URL?.replace(/\/+$/, "");
   const token = process.env.FLEET_ADMIN_TOKEN;

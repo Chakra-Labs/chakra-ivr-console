@@ -5,13 +5,13 @@ import { useState } from "react";
 import { ColumnChart, Heatmap } from "./charts";
 import { RequestsAndErrors, monthProgress } from "./dashboard-page";
 import { useFleet } from "./fleet-context";
-import { licenseApi, useAnalytics, useHub } from "./hub-context";
-import { AlertTriangle, ArrowLeft, Building, Calendar, Clock, Gauge, Key, RefreshCw, Trash2, Zap } from "./icons";
-import { Badge, Button, Card, ChartSkeleton, Empty, ErrorBanner, KeyValue, LinesSkeleton, Meter, MiniStat, Segmented, Skeleton, Stat, Spinner, cx, inputClass } from "./ui";
+import { useAnalytics, useHub } from "./hub-context";
+import { AlertTriangle, ArrowLeft, Building, Calendar, Clock, Gauge, Settings, Zap } from "./icons";
+import { Badge, Button, Card, ChartSkeleton, Empty, ErrorBanner, KeyValue, LinesSkeleton, Meter, MiniStat, Segmented, Skeleton, Stat, cx } from "./ui";
 import { ago, compact, dateOnly, dateTime, dayLabel, minutes, num, pct, signedPct } from "@/lib/format";
-import { INFLIGHT_PER_LINE, findPackage, gpusFor, packageLines, packageQuota } from "@/lib/packages";
-import { MAX_LIMIT_MINUTES, MAX_WARNING_SECONDS, describeLimit, formatAgentLimits, parseAgentLimits, wholeNumber } from "@/lib/daily-limit";
-import { PIPELINES, formatAgentPins, parseAgentPins, pipelineLabel } from "@/lib/pipelines";
+import { INFLIGHT_PER_LINE, gpusFor, packageLines, packageQuota } from "@/lib/packages";
+import { describeLimit } from "@/lib/daily-limit";
+import { pipelineLabel } from "@/lib/pipelines";
 import type { Client, LicenseUsage } from "@/lib/types";
 
 const EMPTY_USAGE: LicenseUsage = {
@@ -26,7 +26,9 @@ function change(now: number, before: number): number | null {
   return (now - before) / before;
 }
 
-export default function CompanyDetail({ id }: { id: number }) {
+/** One company's page. `companyView`: the company's own dashboard (a company
+ * account), without the admin's navigation and Chakra Labs' GPU figures. */
+export default function CompanyDetail({ id, companyView = false }: { id: number; companyView?: boolean }) {
   const { clients, clientsLoaded, packages, navigate, now } = useHub();
   const [days, setDays] = useState<7 | 30 | 90>(30);
   const { data, error } = useAnalytics(days, id);
@@ -36,8 +38,8 @@ export default function CompanyDetail({ id }: { id: number }) {
   if (!client) {
     return (
       <div className="space-y-4">
-        <BackLink onClick={() => navigate({ page: "companies" })} />
-        <Empty>This company no longer exists.</Empty>
+        {!companyView && <BackLink onClick={() => navigate({ page: "companies" })} />}
+        <Empty>{companyView ? "Your licence could not be loaded." : "This company no longer exists."}</Empty>
       </div>
     );
   }
@@ -55,7 +57,7 @@ export default function CompanyDetail({ id }: { id: number }) {
 
   return (
     <div className="space-y-5">
-      <BackLink onClick={() => navigate({ page: "companies" })} />
+      {!companyView && <BackLink onClick={() => navigate({ page: "companies" })} />}
 
       {/* Shares its view-transition-name with this company's card on the
           Companies page, so opening a card grows it into this header. */}
@@ -82,6 +84,9 @@ export default function CompanyDetail({ id }: { id: number }) {
             detail={data ? `${minutes(u.month_minutes)} / ${compact(quota)} min` : "…"}
           />
         </div>
+        <Button onClick={() => navigate({ page: "manage", id: client.id })}>
+          <Settings size={14} /> Manage licence
+        </Button>
       </section>
 
       <ErrorBanner message={error} />
@@ -218,13 +223,14 @@ export default function CompanyDetail({ id }: { id: number }) {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-        <Card className="xl:col-span-7" title="Requests & errors" subtitle={`Last ${days} days`}>
+        <Card className={companyView ? "xl:col-span-12" : "xl:col-span-7"} title="Requests & errors" subtitle={`Last ${days} days`}>
           <RequestsAndErrors data={data} labels={labels} />
         </Card>
-        <div className="xl:col-span-5 space-y-4">
-          <CapacityCard client={client} lines={lines} usage={u} />
-          <ManageLicense key={client.id} client={client} />
-        </div>
+        {!companyView && (
+          <div className="xl:col-span-5 space-y-4">
+            <CapacityCard client={client} lines={lines} usage={u} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -311,269 +317,6 @@ function CapacityCard({ client, lines, usage }: { client: Client; lines: number;
         The gateway allows {INFLIGHT_PER_LINE} requests in flight per line (one STT + one TTS per live call).
         {usage.month_rejected > 0 && <span className="text-warning"> {num(usage.month_rejected)} request{usage.month_rejected === 1 ? " was" : "s were"} refused at the limit this month.</span>}
       </p>
-    </Card>
-  );
-}
-
-function PipelineSettings({
-  client,
-  busy,
-  onSave,
-}: {
-  client: Client;
-  busy: string | null;
-  onSave: (body: { pipelines: string[]; agentPipelines: Record<string, string> }) => void;
-}) {
-  const current = client.pipelines ?? [];
-  const [primary, setPrimary] = useState<string>(current[0] ?? "");
-  const [alsoOther, setAlsoOther] = useState(current.length > 1);
-  const [pins, setPins] = useState(formatAgentPins(client.agent_pipelines));
-  const other = PIPELINES.find((p) => p.id !== primary);
-  const next = primary ? [primary, ...(alsoOther && other ? [other.id] : [])] : [];
-  const nextPins = parseAgentPins(pins);
-  const unchanged =
-    JSON.stringify(next) === JSON.stringify(current) &&
-    JSON.stringify(nextPins) === JSON.stringify(client.agent_pipelines ?? {});
-
-  return (
-    <div>
-      <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor="company-pipeline">Voice pipeline</label>
-      <div className="flex gap-2">
-        <select id="company-pipeline" className={inputClass} value={primary} onChange={(e) => setPrimary(e.target.value)}>
-          <option value="">Not assigned (the client&apos;s config decides)</option>
-          {PIPELINES.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label} · {p.detail}
-            </option>
-          ))}
-        </select>
-        <Button disabled={unchanged || busy !== null} onClick={() => onSave({ pipelines: next, agentPipelines: nextPins })}>
-          {busy === "Pipeline" && <Spinner size={13} />} Save
-        </Button>
-      </div>
-      {primary && other && (
-        <label className="mt-2 flex items-center gap-2 text-[12px] text-ink-2">
-          <input type="checkbox" checked={alsoOther} onChange={(e) => setAlsoOther(e.target.checked)} />
-          Also allow {other.label} (for agents pinned to it, or the client choosing it)
-        </label>
-      )}
-      <label className="block text-[12px] text-ink-2 mt-3 mb-1.5" htmlFor="company-agent-pins">
-        Agents pinned to a pipeline <span className="text-ink-3">(optional, one per line: agent = chakra | gemini_live)</span>
-      </label>
-      <textarea
-        id="company-agent-pins"
-        className={cx(inputClass, "font-mono text-[12px] min-h-[64px]")}
-        value={pins}
-        placeholder="sayury-ai = chakra"
-        onChange={(e) => setPins(e.target.value)}
-      />
-      <p className="text-[11px] text-ink-3 mt-1.5">
-        Read from the signed licence check: takes effect when the client&apos;s agents next start (running agents within 10 minutes).
-        A pin always wins; otherwise the client&apos;s own setting is used only if allowed here, else the default.
-      </p>
-    </div>
-  );
-}
-
-function DailyLimitSettings({
-  client,
-  busy,
-  onSave,
-}: {
-  client: Client;
-  busy: string | null;
-  onSave: (body: { dailyLimitMinutes: number; limitWarningSeconds: number; agentDailyLimits: Record<string, number> }) => void;
-}) {
-  const [minutes, setMinutes] = useState(String(client.daily_limit_minutes ?? 0));
-  const [warning, setWarning] = useState(String(client.limit_warning_seconds ?? 60));
-  const [agents, setAgents] = useState(formatAgentLimits(client.agent_daily_limits));
-  const nextMinutes = wholeNumber(minutes, MAX_LIMIT_MINUTES);
-  const nextWarning = wholeNumber(warning, MAX_WARNING_SECONDS);
-  const nextAgents = parseAgentLimits(agents);
-  const valid = nextMinutes !== null && nextWarning !== null;
-  const unchanged =
-    nextMinutes === (client.daily_limit_minutes ?? 0) &&
-    nextWarning === (client.limit_warning_seconds ?? 60) &&
-    JSON.stringify(nextAgents) === JSON.stringify(client.agent_daily_limits ?? {});
-
-  return (
-    <div>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor="company-daily-limit">
-            Daily talk time per caller <span className="text-ink-3">(minutes, 0 = no limit)</span>
-          </label>
-          <input
-            id="company-daily-limit"
-            className={cx(inputClass, nextMinutes === null && "border-critical")}
-            inputMode="numeric"
-            value={minutes}
-            onChange={(e) => setMinutes(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor="company-limit-warning">
-            Warn before the end <span className="text-ink-3">(seconds, 0 = no warning)</span>
-          </label>
-          <input
-            id="company-limit-warning"
-            className={cx(inputClass, nextWarning === null && "border-critical")}
-            inputMode="numeric"
-            value={warning}
-            onChange={(e) => setWarning(e.target.value)}
-          />
-        </div>
-      </div>
-      <label className="block text-[12px] text-ink-2 mt-3 mb-1.5" htmlFor="company-agent-limits">
-        Agents with their own limit <span className="text-ink-3">(optional, one per line: agent = minutes; 0 = no limit)</span>
-      </label>
-      <div className="flex gap-2 items-start">
-        <textarea
-          id="company-agent-limits"
-          className={cx(inputClass, "font-mono text-[12px] min-h-[64px]")}
-          value={agents}
-          placeholder="sayuru-ai-tamil = 10"
-          onChange={(e) => setAgents(e.target.value)}
-        />
-        <Button
-          disabled={!valid || unchanged || busy !== null}
-          onClick={() => {
-            if (nextMinutes !== null && nextWarning !== null) {
-              onSave({ dailyLimitMinutes: nextMinutes, limitWarningSeconds: nextWarning, agentDailyLimits: nextAgents });
-            }
-          }}
-        >
-          {busy === "Daily limit" && <Spinner size={13} />} Save
-        </Button>
-      </div>
-      <p className="text-[11px] text-ink-3 mt-1.5">
-        Minutes each phone number may talk per day (Sri Lanka time), counted from the client&apos;s own call records. A caller
-        who is out of time is told to call back tomorrow; a call is warned, then ended, when the time runs out. Needs
-        chakra-ivr-core 0.5+; applies within 10 minutes.
-      </p>
-    </div>
-  );
-}
-
-function ManageLicense({ client }: { client: Client }) {
-  const { packages, setClients, toast, rotateKey, navigate } = useHub();
-  const [name, setName] = useState(client.company_name);
-  const [pkg, setPkg] = useState(findPackage(packages, client.package_name)?.name ?? client.package_name ?? "Essential");
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const update = async (body: Record<string, unknown>, what: string) => {
-    setBusy(what);
-    try {
-      const row = await licenseApi<Partial<Client>>("PUT", { id: client.id, ...body });
-      setClients((cs) => cs.map((c) => (c.id === client.id ? { ...c, ...row, month_minutes: c.month_minutes, last_activity: c.last_activity } : c)));
-      toast(`${what} saved`, "success");
-    } catch (e) {
-      toast(`Could not save: ${(e as Error).message}`);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const remove = async () => {
-    if (!confirm(`Delete ${client.company_name}'s licence?\n\nIts key stops working within a minute. Usage history is kept. This cannot be undone.`)) return;
-    setBusy("delete");
-    try {
-      await licenseApi("DELETE", { id: client.id });
-      setClients((cs) => cs.filter((c) => c.id !== client.id));
-      toast("Licence deleted", "success");
-      navigate({ page: "companies" });
-    } catch (e) {
-      toast(`Could not delete: ${(e as Error).message}`);
-      setBusy(null);
-    }
-  };
-
-  return (
-    <Card title="Manage licence">
-      <div className="space-y-4">
-        <div>
-          <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor="company-name">Company name</label>
-          <div className="flex gap-2">
-            <input id="company-name" className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
-            <Button
-              disabled={!name.trim() || name.trim() === client.company_name || busy !== null}
-              onClick={() => update({ action: "edit", companyName: name.trim() }, "Name")}
-            >
-              {busy === "Name" && <Spinner size={13} />} Save
-            </Button>
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor="company-package">Package</label>
-          <div className="flex gap-2">
-            <select id="company-package" className={inputClass} value={pkg} onChange={(e) => setPkg(e.target.value)}>
-              {packages.map((p) => (
-                <option key={p.id} value={p.name}>
-                  {p.name} · {compact(p.maxMinutes)} min · {p.lines} lines
-                </option>
-              ))}
-            </select>
-            <Button
-              disabled={pkg === client.package_name || busy !== null}
-              onClick={() => update({ action: "package", packageName: pkg }, "Package")}
-            >
-              {busy === "Package" && <Spinner size={13} />} Save
-            </Button>
-          </div>
-          <p className="text-[11px] text-ink-3 mt-1.5">The GPU fleet re-sizes from packages, so check GPU fleet after an upgrade.</p>
-        </div>
-
-        <PipelineSettings client={client} busy={busy} onSave={(body) => update({ action: "pipelines", ...body }, "Pipeline")} />
-        <DailyLimitSettings client={client} busy={busy} onSave={(body) => update({ action: "daily_limit", ...body }, "Daily limit")} />
-
-        <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-panel-2 border border-line">
-          <div>
-            <div className="text-[13px] text-ink">Licence status</div>
-            <div className="text-[11px] text-ink-3">{client.is_active ? "Active: the key works" : "Suspended: the key is refused"}</div>
-          </div>
-          <button
-            role="switch"
-            aria-checked={client.is_active}
-            aria-label="Licence active"
-            disabled={busy !== null}
-            onClick={() => update({ action: "toggle_status", isActive: !client.is_active }, client.is_active ? "Suspension" : "Activation")}
-            className={cx("relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50", client.is_active ? "bg-accent" : "bg-panel-3 border border-line-strong")}
-          >
-            <span className={cx("inline-block h-4 w-4 rounded-full bg-white shadow transition-transform", client.is_active ? "translate-x-6" : "translate-x-1")} />
-          </button>
-        </div>
-
-        <div className="p-3 rounded-xl bg-panel-2 border border-line">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[13px] text-ink inline-flex items-center gap-1.5">
-                <Key size={13} /> Licence key
-              </div>
-              <div className="font-mono text-[12px] text-ink-2 truncate mt-0.5">{client.token_prefix ?? "chk_live_"}••••••••••••</div>
-            </div>
-            <Button
-              disabled={busy !== null}
-              onClick={async () => {
-                setBusy("rotate");
-                await rotateKey(client);
-                setBusy(null);
-              }}
-            >
-              {busy === "rotate" ? <Spinner size={13} /> : <RefreshCw size={13} />} {busy === "rotate" ? "Rotating…" : "Rotate key"}
-            </Button>
-          </div>
-          <p className="text-[11px] text-ink-3 mt-2">
-            Keys are stored only as a hash, so the full key is shown once, when it is created or rotated.
-          </p>
-        </div>
-
-        <div className="pt-1 flex justify-end">
-          <Button variant="danger" disabled={busy !== null} onClick={remove}>
-            <Trash2 size={14} /> Delete licence
-          </Button>
-        </div>
-      </div>
     </Card>
   );
 }

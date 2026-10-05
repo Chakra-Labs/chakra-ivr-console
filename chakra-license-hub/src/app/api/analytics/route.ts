@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { currentAdmin, unauthorized } from "@/lib/auth";
+import { currentViewer, unauthorized } from "@/lib/auth";
 import { hasCallUsage, OFF_GATEWAY, pool, TIME_ZONE, usageSchema } from "@/lib/db";
 import type { Analytics, DailyPoint, HeatCell, LicenseUsage } from "@/lib/types";
 
@@ -27,11 +27,18 @@ const EMPTY_USAGE: LicenseUsage = {
 };
 
 export async function GET(request: NextRequest) {
-  if (!(await currentAdmin())) return unauthorized();
+  const viewer = await currentViewer();
+  if (!viewer) return unauthorized();
   const params = request.nextUrl.searchParams;
   const days = ALLOWED_DAYS.has(Number(params.get("days"))) ? Number(params.get("days")) : 30;
   const licenseParam = params.get("license");
-  const license = licenseParam && /^\d+$/.test(licenseParam) ? Number(licenseParam) : null;
+  // A company account only ever gets its own licence's numbers.
+  const license =
+    viewer.role === "company"
+      ? viewer.licenseId
+      : licenseParam && /^\d+$/.test(licenseParam)
+        ? Number(licenseParam)
+        : null;
 
   if (!pool) return Response.json({ error: "DATABASE_URL is not configured" }, { status: 500 });
 

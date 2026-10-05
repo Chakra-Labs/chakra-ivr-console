@@ -1,11 +1,14 @@
-// Signed admin sessions: `<base64url(payload)>.<base64url(HMAC-SHA256)>` in an
-// HttpOnly cookie. Web Crypto only, so the same code runs in proxy.ts and in
+// Signed sessions (admins and company accounts):
+// `<base64url(payload)>.<base64url(HMAC-SHA256)>` in an HttpOnly cookie. Web Crypto only, so the same code runs in proxy.ts and in
 // route handlers. The signing key is SESSION_SECRET (32+ characters).
 
 export const SESSION_COOKIE = "chakra_admin_session";
 export const SESSION_MAX_AGE = 12 * 60 * 60; // seconds
 
-export type Session = { sub: string; exp: number };
+/** `sub` is the email. A company account's session also carries its account id
+ * (`uid`) and the time its password was last set (`pv`): a reset changes `pv`,
+ * which signs out every session made with the old password. */
+export type Session = { sub: string; exp: number; role?: "company"; uid?: number; pv?: number };
 
 const enc = new TextEncoder();
 
@@ -39,8 +42,12 @@ function signingKey(): Promise<CryptoKey> {
   return keyPromise;
 }
 
-export async function createSession(email: string): Promise<string> {
-  const payload: Session = { sub: email, exp: Math.floor(Date.now() / 1000) + SESSION_MAX_AGE };
+export async function createSession(email: string, company?: { uid: number; pv: number }): Promise<string> {
+  const payload: Session = {
+    sub: email,
+    exp: Math.floor(Date.now() / 1000) + SESSION_MAX_AGE,
+    ...(company ? { role: "company" as const, uid: company.uid, pv: company.pv } : {}),
+  };
   const body = b64url(enc.encode(JSON.stringify(payload)));
   const sig = new Uint8Array(await crypto.subtle.sign("HMAC", await signingKey(), enc.encode(body)));
   return `${body}.${b64url(sig)}`;

@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { default: "Chakra Console", template: "%s · Chakra Console" },
-  description: "Chakra Labs' admin console: customers, licences and API keys, speech usage, and the GPU fleet's health and performance.",
-  applicationName: "Chakra Console",
+  title: { default: "IVR Console", template: "%s · IVR Console" },
+  description: "Chakra Labs' IVR Console: customers, licences and API keys, usage, and the GPU fleet's health and performance; companies sign in to see their own.",
+  applicationName: "IVR Console",
   authors: [{ name: "Chakra Labs" }],
   // A private admin tool: keep it out of search engines.
   robots: { index: false, follow: false },

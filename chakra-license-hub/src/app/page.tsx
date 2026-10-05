@@ -1,8 +1,9 @@
 "use client";
 
-// The admin hub shell: sidebar, header, routing (#hash), shared data.
-// Signing in is enforced on the server (proxy.ts + every API route); this page
-// only renders for a signed-in admin.
+// IVR Console's shell: sidebar, header, routing (#hash), shared data.
+// Signing in is enforced on the server (proxy.ts + every API route). An admin
+// sees everything; a company account sees its own dashboard and Manage licence
+// only (the API refuses it anything else, whatever this page shows).
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -16,12 +17,13 @@ import FleetPage from "@/components/fleet-page";
 import GpuPage from "@/components/gpu-page";
 import { Header } from "@/components/header";
 import { HubContext, licenseApi, parseRoute, routeHash, type Hub, type Route } from "@/components/hub-context";
-import { Activity, Box, Building, Check, Copy, Key, LayoutDashboard, Server, X } from "@/components/icons";
+import { Activity, Box, Building, Check, Copy, Key, LayoutDashboard, Server, Settings, X } from "@/components/icons";
+import ManagePage from "@/components/manage-page";
 import NewLicensePage from "@/components/new-license-page";
 import PackagesPage from "@/components/packages-page";
-import { Button, cx } from "@/components/ui";
+import { Button, Spinner, cx } from "@/components/ui";
 import { DEFAULT_PACKAGES, type Package } from "@/lib/packages";
-import type { Client } from "@/lib/types";
+import type { Client, ViewerInfo } from "@/lib/types";
 
 const TITLES: Record<Route["page"], { title: string; subtitle: string }> = {
   dashboard: { title: "Dashboard", subtitle: "Speech usage, customers and GPU health at a glance" },
@@ -31,23 +33,44 @@ const TITLES: Record<Route["page"], { title: string; subtitle: string }> = {
   packages: { title: "Packages", subtitle: "Monthly minutes and lines per subscription package" },
   gpus: { title: "GPU performance", subtitle: "Health, traffic, latency and resources of every GPU" },
   fleet: { title: "GPU fleet", subtitle: "Add, deploy, drain and remove GPU servers" },
+  manage: { title: "Manage licences", subtitle: "Each company's licence, daily talk time and IVR Console sign-in" },
 };
 
+/** Pages a company account may open; anything else shows its dashboard. */
+const COMPANY_PAGES: Route["page"][] = ["dashboard", "manage"];
+
 export default function App() {
+  const router = useRouter();
+  const [viewer, setViewer] = useState<ViewerInfo | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((me) => (me ? setViewer(me) : router.replace("/login")))
+      .catch(() => router.replace("/login"));
+  }, [router]);
+
+  if (!viewer) {
+    return (
+      <div className="min-h-viewport bg-canvas flex items-center justify-center text-ink-3" aria-busy="true">
+        <Spinner size={18} />
+      </div>
+    );
+  }
+  // The GPU fleet is Chakra Labs' own: a company account never asks for it.
   return (
-    <FleetProvider>
-      <Shell />
+    <FleetProvider enabled={viewer.role === "admin"}>
+      <Shell viewer={viewer} />
     </FleetProvider>
   );
 }
 
-function Shell() {
+function Shell({ viewer }: { viewer: ViewerInfo }) {
   const router = useRouter();
   const [route, setRoute] = useState<Route>({ page: "dashboard" });
   const [clients, setClients] = useState<Client[]>([]);
   const [clientsLoaded, setClientsLoaded] = useState(false);
   const [packages, setPackages] = useState<Package[]>(DEFAULT_PACKAGES);
-  const [adminEmail, setAdminEmail] = useState("");
   const [toastMsg, setToastMsg] = useState<{ text: string; tone: "error" | "success" } | null>(null);
   const [revealed, setRevealed] = useState<{ company: string; key: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -132,10 +155,6 @@ function Shell() {
 
   useEffect(() => {
     const first = setTimeout(() => reloadClients(), 0);
-    fetch("/api/auth/me")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((me) => me && setAdminEmail(me.email))
-      .catch(() => {});
     const t = setInterval(() => reloadClients(true), 120_000);
     return () => {
       clearTimeout(first);
@@ -164,8 +183,8 @@ function Shell() {
   );
 
   const hub = useMemo<Hub>(
-    () => ({ clients, clientsLoaded, setClients, reloadClients, packages, setPackages, navigate, toast, rotateKey, now }),
-    [clients, clientsLoaded, reloadClients, packages, navigate, toast, rotateKey, now],
+    () => ({ viewer, clients, clientsLoaded, setClients, reloadClients, packages, setPackages, navigate, toast, rotateKey, now }),
+    [viewer, clients, clientsLoaded, reloadClients, packages, navigate, toast, rotateKey, now],
   );
 
   const logout = async () => {
@@ -174,17 +193,22 @@ function Shell() {
     router.refresh();
   };
 
-  const company = route.page === "company" ? clients.find((c) => c.id === route.id) : undefined;
-  const heading =
-    route.page === "company"
+  const isCompany = viewer.role === "company";
+  const page: Route = isCompany && !COMPANY_PAGES.includes(route.page) ? { page: "dashboard" } : route;
+  const company = page.page === "company" ? clients.find((c) => c.id === page.id) : undefined;
+  const heading = isCompany
+    ? page.page === "manage"
+      ? { title: "Manage licence", subtitle: "Your daily talk time, licence and sign-in" }
+      : { title: "Dashboard", subtitle: `${viewer.companyName}: calls, minutes and usage` }
+    : page.page === "company"
       ? { title: company?.company_name ?? "Company", subtitle: company ? `${company.package_name || "Essential"} package` : "" }
-      : TITLES[route.page];
+      : TITLES[page.page];
 
   // The browser tab names the page: "Companies · Chakra Console".
   // Set again shortly after: on a fresh load Next.js writes the layout's
   // default title once the page has hydrated, over this one.
   useEffect(() => {
-    const title = `${heading.title} · Chakra Console`;
+    const title = `${heading.title} · IVR Console`;
     document.title = title;
     const again = setTimeout(() => (document.title = title), 400);
     return () => clearTimeout(again);
@@ -213,13 +237,13 @@ function Shell() {
           )}
         </div>
 
-        <Sidebar route={route} open={menuOpen} onClose={() => setMenuOpen(false)} />
+        <Sidebar route={page} viewer={viewer} open={menuOpen} onClose={() => setMenuOpen(false)} />
 
         <main className="flex-1 min-w-0 flex flex-col">
           <Header
             title={heading.title}
             subtitle={heading.subtitle}
-            adminEmail={adminEmail}
+            viewer={viewer}
             onLogout={logout}
             onOpenGpu={(node) => navigate({ page: "gpus", node })}
             onMenu={() => setMenuOpen(true)}
@@ -227,17 +251,27 @@ function Shell() {
           <div className="flex-1 px-4 md:px-8 py-6">
             {/* Keyed per page, so each page fades in when opened. */}
             <div
-              key={route.page === "company" ? `company-${route.id}` : route.page}
+              key={page.page === "company" ? `company-${page.id}` : page.page}
               className="max-w-[1440px] mx-auto page-in"
               style={{ viewTransitionName: "page" }}
             >
-              {route.page === "dashboard" && <DashboardPage />}
-              {route.page === "companies" && <CompaniesPage />}
-              {route.page === "company" && <CompanyDetail id={route.id} />}
-              {route.page === "new" && <NewLicensePage />}
-              {route.page === "packages" && <PackagesPage />}
-              {route.page === "gpus" && <GpuPage node={route.node} />}
-              {route.page === "fleet" && <FleetPage />}
+              {isCompany ? (
+                <>
+                  {page.page === "dashboard" && <CompanyDetail id={viewer.licenseId} companyView />}
+                  {page.page === "manage" && <ManagePage />}
+                </>
+              ) : (
+                <>
+                  {page.page === "dashboard" && <DashboardPage />}
+                  {page.page === "companies" && <CompaniesPage />}
+                  {page.page === "company" && <CompanyDetail id={page.id} />}
+                  {page.page === "manage" && <ManagePage id={page.id} />}
+                  {page.page === "new" && <NewLicensePage />}
+                  {page.page === "packages" && <PackagesPage />}
+                  {page.page === "gpus" && <GpuPage node={page.node} />}
+                  {page.page === "fleet" && <FleetPage />}
+                </>
+              )}
             </div>
           </div>
         </main>
@@ -248,18 +282,25 @@ function Shell() {
   );
 }
 
-function Sidebar({ route, open, onClose }: { route: Route; open: boolean; onClose: () => void }) {
+function Sidebar({ route, viewer, open, onClose }: { route: Route; viewer: ViewerInfo; open: boolean; onClose: () => void }) {
   const { alerts, loaded } = useFleet();
   const down = alerts.filter((a) => a.assessment.level === "down").length;
   const peak = alerts.filter((a) => a.assessment.level === "peak").length;
   const active = route.page === "company" ? "companies" : route.page;
+  const isAdmin = viewer.role === "admin";
 
-  const groups: { label: string; items: { page: Route["page"]; label: string; icon: ReactNode; badge?: ReactNode }[] }[] = [
+  type Group = { label: string; items: { page: Route["page"]; label: string; icon: ReactNode; badge?: ReactNode }[] };
+  const companyGroups: Group[] = [
+    { label: "Overview", items: [{ page: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={16} /> }] },
+    { label: "Customers", items: [{ page: "manage", label: "Manage licence", icon: <Settings size={16} /> }] },
+  ];
+  const adminGroups: Group[] = [
     { label: "Overview", items: [{ page: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={16} /> }] },
     {
       label: "Customers",
       items: [
         { page: "companies", label: "Companies", icon: <Building size={16} /> },
+        { page: "manage", label: "Manage licences", icon: <Settings size={16} /> },
         { page: "packages", label: "Packages", icon: <Box size={16} /> },
       ],
     },
@@ -280,6 +321,7 @@ function Sidebar({ route, open, onClose }: { route: Route; open: boolean; onClos
       ],
     },
   ];
+  const groups = isAdmin ? adminGroups : companyGroups;
 
   return (
     <>
@@ -293,7 +335,7 @@ function Sidebar({ route, open, onClose }: { route: Route; open: boolean; onClos
       >
         <div className="relative px-5 pt-8 pb-5 flex flex-col items-center">
           <Image src="/chakra-labs-logo.png" alt="Chakra Labs" width={170} height={48} className="w-auto h-10 object-contain" priority />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-ink-3 mt-1.5">Console</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-ink-3 mt-1.5">IVR Console</span>
           <button onClick={onClose} className="md:hidden absolute right-4 top-4 text-ink-3 hover:text-ink" aria-label="Close menu">
             <X size={18} />
           </button>
@@ -333,6 +375,8 @@ function Sidebar({ route, open, onClose }: { route: Route; open: boolean; onClos
         </div>
         */}
 
+        {isAdmin && (
+        <>
         <div className="px-3 pt-3">
           <a
             href="#new"
@@ -353,6 +397,14 @@ function Sidebar({ route, open, onClose }: { route: Route; open: boolean; onClos
             {!loaded ? "Checking GPUs…" : down ? `${down} GPU${down > 1 ? "s" : ""} down` : peak ? `${peak} GPU${peak > 1 ? "s" : ""} at peak` : "All GPUs healthy"}
           </span>
         </a>
+        </>
+        )}
+        {!isAdmin && (
+          <div className="m-3 p-3 rounded-xl border border-line bg-panel-2">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-3">Company</div>
+            <div className="text-[13px] text-ink font-medium truncate mt-0.5">{viewer.companyName}</div>
+          </div>
+        )}
       </aside>
     </>
   );

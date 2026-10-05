@@ -1,6 +1,6 @@
 import crypto from "crypto";
 
-import { currentAdmin, unauthorized } from "@/lib/auth";
+import { currentViewer, forbidden, unauthorized, type Viewer } from "@/lib/auth";
 import { hasCallUsage, OFF_GATEWAY, pool, TIME_ZONE, usageSchema } from "@/lib/db";
 import { MAX_LIMIT_MINUTES, MAX_WARNING_SECONDS, wholeNumber } from "@/lib/daily-limit";
 import { isPipeline } from "@/lib/pipelines";
@@ -30,6 +30,12 @@ function newKey() {
   };
 }
 
+/** The response refusing anyone but an admin, or null for an admin. */
+function adminOnly(viewer: Viewer | null): Response | null {
+  if (!viewer) return unauthorized();
+  return viewer.role === "admin" ? null : forbidden();
+}
+
 function noDatabase(): Response {
   return Response.json({ error: "DATABASE_URL is not configured" }, { status: 500 });
 }
@@ -55,15 +61,21 @@ function dailyLimitBody(body: { dailyLimitMinutes?: unknown; limitWarningSeconds
 }
 
 export async function GET() {
-  if (!(await currentAdmin())) return unauthorized();
+  const viewer = await currentViewer();
+  if (!viewer) return unauthorized();
   if (MOCK) return Response.json(mockLicenses);
   if (!pool) return noDatabase();
+  // A company account sees its own licence only.
+  const only = viewer.role === "company" ? viewer.licenseId : null;
   try {
     // Usage comes from the speech gateway's meter (speech_usage), plus call_usage
     // for calls that bypass the gateway, this month in Sri Lanka time.
     // `used_minutes` is the old license server's counter.
     if (!(await usageSchema()).table) {
-      const result = await pool.query(`SELECT ${PUBLIC_COLUMNS} FROM licenses ORDER BY created_at DESC`);
+      const result = await pool.query(
+        `SELECT ${PUBLIC_COLUMNS} FROM licenses WHERE ($1::int IS NULL OR id = $1) ORDER BY created_at DESC`,
+        [only],
+      );
       return Response.json(result.rows.map((r) => ({ ...r, month_minutes: 0, last_activity: null })));
     }
     // Plus the call minutes of calls that bypass the gateway (see OFF_GATEWAY).
@@ -91,8 +103,9 @@ export async function GET() {
              : "SELECT NULL::int AS license_id, NULL::float8 AS month_minutes, NULL::timestamptz AS last_activity"
          }
        ) c ON c.license_id = l.id
+       WHERE ($2::int IS NULL OR l.id = $2)
        ORDER BY l.created_at DESC`,
-      [TIME_ZONE],
+      [TIME_ZONE, only],
     );
     return Response.json(result.rows);
   } catch (error) {
@@ -101,7 +114,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  if (!(await currentAdmin())) return unauthorized();
+  const refused = adminOnly(await currentViewer());
+  if (refused) return refused;
   let companyName = "";
   let packageName = "";
   try {
@@ -134,7 +148,8 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  if (!(await currentAdmin())) return unauthorized();
+  const viewer = await currentViewer();
+  if (!viewer) return unauthorized();
   let body: {
     id?: unknown;
     action?: unknown;
@@ -154,6 +169,9 @@ export async function PUT(request: Request) {
   }
   const id = Number(body.id);
   if (!Number.isInteger(id)) return Response.json({ error: "ID is required" }, { status: 400 });
+  // A company account may set its own daily talk time, and nothing else: not
+  // the voice pipeline, package, name, status or key, nor another licence.
+  if (viewer.role === "company" && (body.action !== "daily_limit" || id !== viewer.licenseId)) return forbidden();
 
   if (MOCK) {
     const row = mockLicenses.find((l) => l.id === id);
@@ -240,7 +258,8 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!(await currentAdmin())) return unauthorized();
+  const refused = adminOnly(await currentViewer());
+  if (refused) return refused;
   let id: number;
   try {
     id = Number((await request.json()).id);

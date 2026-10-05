@@ -1,6 +1,11 @@
-import { currentAdmin, unauthorized } from "@/lib/auth";
+import { currentViewer, unauthorized } from "@/lib/auth";
 
 export async function GET() {
-  const email = await currentAdmin();
-  return email ? Response.json({ email }) : unauthorized();
+  const viewer = await currentViewer();
+  if (!viewer) return unauthorized();
+  return Response.json(
+    viewer.role === "admin"
+      ? { role: "admin", email: viewer.email }
+      : { role: "company", email: viewer.email, licenseId: viewer.licenseId, companyName: viewer.companyName },
+  );
 }

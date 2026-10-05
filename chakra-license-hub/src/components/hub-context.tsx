@@ -6,7 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type Dispa
 
 import { track } from "@/lib/loading";
 import type { Package } from "@/lib/packages";
-import type { Analytics, Client } from "@/lib/types";
+import type { Analytics, Client, ViewerInfo } from "@/lib/types";
 
 export type Route =
   | { page: "dashboard" }
@@ -15,7 +15,8 @@ export type Route =
   | { page: "new" }
   | { page: "packages" }
   | { page: "gpus"; node?: number }
-  | { page: "fleet" };
+  | { page: "fleet" }
+  | { page: "manage"; id?: number };
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#\/?/, "");
@@ -23,17 +24,22 @@ export function parseRoute(hash: string): Route {
   if (company) return { page: "company", id: Number(company[1]) };
   const gpu = /^gpus\/(\d+)$/.exec(h);
   if (gpu) return { page: "gpus", node: Number(gpu[1]) };
-  if (["companies", "new", "packages", "gpus", "fleet"].includes(h)) return { page: h } as Route;
+  const manage = /^manage\/(\d+)$/.exec(h);
+  if (manage) return { page: "manage", id: Number(manage[1]) };
+  if (["companies", "new", "packages", "gpus", "fleet", "manage"].includes(h)) return { page: h } as Route;
   return { page: "dashboard" };
 }
 
 export function routeHash(r: Route): string {
   if (r.page === "company") return `#company/${r.id}`;
   if (r.page === "gpus" && r.node != null) return `#gpus/${r.node}`;
+  if (r.page === "manage" && r.id != null) return `#manage/${r.id}`;
   return `#${r.page}`;
 }
 
 export interface Hub {
+  /** Who is signed in: an admin sees everything; a company account only its licence. */
+  viewer: ViewerInfo;
   clients: Client[];
   clientsLoaded: boolean;
   setClients: Dispatch<SetStateAction<Client[]>>;
