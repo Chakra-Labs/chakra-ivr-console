@@ -1,7 +1,7 @@
 import crypto from "crypto";
 
 import { currentAdmin, unauthorized } from "@/lib/auth";
-import { pool, TIME_ZONE, usageSchema } from "@/lib/db";
+import { hasCallUsage, OFF_GATEWAY, pool, TIME_ZONE, usageSchema } from "@/lib/db";
 import { isPipeline } from "@/lib/pipelines";
 
 // Client API keys. Stored as SHA-256 hashes (see chakra-license-server
@@ -42,16 +42,19 @@ export async function GET() {
   if (MOCK) return Response.json(mockLicenses);
   if (!pool) return noDatabase();
   try {
-    // Usage comes from the speech gateway's meter (speech_usage), this month
-    // in Sri Lanka time. `used_minutes` is the old license server's counter,
-    // which nothing reports to any more.
+    // Usage comes from the speech gateway's meter (speech_usage), plus call_usage
+    // for calls that bypass the gateway, this month in Sri Lanka time.
+    // `used_minutes` is the old license server's counter.
     if (!(await usageSchema()).table) {
       const result = await pool.query(`SELECT ${PUBLIC_COLUMNS} FROM licenses ORDER BY created_at DESC`);
       return Response.json(result.rows.map((r) => ({ ...r, month_minutes: 0, last_activity: null })));
     }
+    // Plus the call minutes of calls that bypass the gateway (see OFF_GATEWAY).
+    const calls = await hasCallUsage();
     const result = await pool.query(
       `SELECT ${PUBLIC_COLUMNS.split(", ").map((c) => `l.${c}`).join(", ")},
-              COALESCE(u.month_minutes, 0)::float8 AS month_minutes, a.last_activity
+              (COALESCE(u.month_minutes, 0) + COALESCE(c.month_minutes, 0))::float8 AS month_minutes,
+              GREATEST(a.last_activity, c.last_activity) AS last_activity
        FROM licenses l
        LEFT JOIN (
          SELECT license_id, SUM(stt_seconds + tts_seconds) / 60 AS month_minutes
@@ -61,6 +64,16 @@ export async function GET() {
        ) u ON u.license_id = l.id
        LEFT JOIN (SELECT license_id, MAX(hour) AS last_activity FROM speech_usage GROUP BY license_id) a
          ON a.license_id = l.id
+       LEFT JOIN (
+         ${
+           calls
+             ? `SELECT license_id,
+                  SUM(call_seconds) FILTER (WHERE hour >= date_trunc('month', now() AT TIME ZONE $1) AT TIME ZONE $1) / 60 AS month_minutes,
+                  MAX(hour) AS last_activity
+                FROM call_usage WHERE ${OFF_GATEWAY} GROUP BY license_id`
+             : "SELECT NULL::int AS license_id, NULL::float8 AS month_minutes, NULL::timestamptz AS last_activity"
+         }
+       ) c ON c.license_id = l.id
        ORDER BY l.created_at DESC`,
       [TIME_ZONE],
     );

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 
 import { currentAdmin, unauthorized } from "@/lib/auth";
-import { pool, TIME_ZONE, usageSchema } from "@/lib/db";
+import { hasCallUsage, OFF_GATEWAY, pool, TIME_ZONE, usageSchema } from "@/lib/db";
 import type { Analytics, DailyPoint } from "@/lib/types";
 
 // Speech usage for the dashboard and the company page, from `speech_usage`
@@ -11,7 +11,9 @@ import type { Analytics, DailyPoint } from "@/lib/types";
 //   GET /api/analytics?days=30&license=7  one licence
 //
 // "Minutes" are speech minutes: caller audio transcribed (STT) plus agent audio
-// spoken (TTS). Days and months follow Sri Lanka time.
+// spoken (TTS). A licence's month totals also count the call minutes of calls
+// that bypass the gateway (Gemini Live), from `call_usage`; the daily chart and
+// heatmap stay speech only. Days and months follow Sri Lanka time.
 
 const ALLOWED_DAYS = new Set([7, 30, 90]);
 
@@ -60,7 +62,8 @@ export async function GET(request: NextRequest) {
     const rejected = schema.extended ? "rejected" : "0";
     const peak = schema.extended ? "peak_inflight" : "0";
 
-    const [daily, heat, perLicense, lastSeen] = await Promise.all([
+    const withCalls = await hasCallUsage();
+    const [daily, heat, perLicense, lastSeen, calls] = await Promise.all([
       pool.query(
         `SELECT to_char((hour AT TIME ZONE $1)::date, 'YYYY-MM-DD') AS day,
                 SUM(stt_seconds)::float8 / 60 AS stt_min, SUM(tts_seconds)::float8 / 60 AS tts_min,
@@ -109,9 +112,34 @@ export async function GET(request: NextRequest) {
          WHERE ($1::int IS NULL OR license_id = $1) GROUP BY license_id`,
         [license],
       ),
+      // Call minutes of calls that bypass the gateway (see OFF_GATEWAY).
+      withCalls
+        ? pool.query(
+            `WITH b AS (
+               SELECT $1::timestamptz AS m,
+                      (($1::timestamptz AT TIME ZONE $2) - interval '1 month') AT TIME ZONE $2 AS lm
+             )
+             SELECT license_id,
+               COALESCE(SUM(call_seconds) FILTER (WHERE hour >= b.m), 0)::float8 / 60 AS month_min,
+               COALESCE(SUM(call_seconds) FILTER (WHERE hour >= b.lm AND hour < b.lm + (now() - b.m)), 0)::float8 / 60 AS last_mtd_min,
+               COALESCE(SUM(call_seconds) FILTER (WHERE hour >= b.lm AND hour < b.m), 0)::float8 / 60 AS last_month_min,
+               MAX(hour) AS last_activity
+             FROM call_usage, b
+             WHERE ${OFF_GATEWAY} AND ($3::int IS NULL OR license_id = $3)
+             GROUP BY license_id`,
+            [cal.month_start, TIME_ZONE, license],
+          )
+        : null,
     ]);
 
     const seen = new Map(lastSeen.rows.map((r) => [Number(r.license_id), r.last_activity as Date]));
+    const offGateway = new Map<number, { month: number; lastMtd: number; lastMonth: number }>();
+    for (const r of calls?.rows ?? []) {
+      const id = Number(r.license_id);
+      offGateway.set(id, { month: f(r.month_min), lastMtd: f(r.last_mtd_min), lastMonth: f(r.last_month_min) });
+      const at = r.last_activity as Date | null;
+      if (at && (!seen.has(id) || at > seen.get(id)!)) seen.set(id, at);
+    }
     const licenses = perLicense.rows.map((r) => ({
       license_id: Number(r.license_id),
       month_minutes: f(r.month_minutes),
@@ -128,7 +156,7 @@ export async function GET(request: NextRequest) {
       last_month_requests: f(r.last_month_requests),
       last_activity: seen.get(Number(r.license_id))?.toISOString() ?? null,
     }));
-    // Licences with older activity only still get their "last active" date.
+    // Licences with older activity (or off-gateway calls only) still get a row.
     for (const [id, at] of seen) {
       if (!licenses.some((l) => l.license_id === id)) {
         licenses.push({
@@ -138,6 +166,13 @@ export async function GET(request: NextRequest) {
           last_activity: at.toISOString(),
         });
       }
+    }
+    for (const l of licenses) {
+      const c = offGateway.get(l.license_id);
+      if (!c) continue;
+      l.month_minutes += c.month;
+      l.last_mtd_minutes += c.lastMtd;
+      l.last_month_minutes += c.lastMonth;
     }
 
     return Response.json({

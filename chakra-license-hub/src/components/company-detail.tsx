@@ -86,7 +86,7 @@ export default function CompanyDetail({ id }: { id: number }) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <Stat
-          label="Speech minutes this month"
+          label="Minutes this month"
           loading={waiting}
           value={minutes(u.month_minutes)}
           sub={`${pct(u.month_minutes / quota)} of ${compact(quota)} min`}

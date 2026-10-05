@@ -34,3 +34,19 @@ export async function usageSchema(): Promise<UsageSchema> {
   if (schema.extended) known = schema;
   return schema;
 }
+
+let callUsageKnown = false;
+
+/** `call_usage` exists (the license server creates it on start, 2026-10-03 on). */
+export async function hasCallUsage(): Promise<boolean> {
+  if (callUsageKnown || !pool) return callUsageKnown;
+  const { rows } = await pool.query("SELECT to_regclass('call_usage') IS NOT NULL AS ok");
+  callUsageKnown = Boolean(rows[0]?.ok);
+  return callUsageKnown;
+}
+
+// Calls that never reach the speech gateway (Gemini Live: speech runs at the
+// client's provider) are metered only as call seconds in `call_usage`, which
+// chakra-ivr-core reports after every call. Their call minutes are added to the
+// licence's speech minutes; Chakra Voice calls are already in `speech_usage`.
+export const OFF_GATEWAY = "pipeline <> 'chakra'";
