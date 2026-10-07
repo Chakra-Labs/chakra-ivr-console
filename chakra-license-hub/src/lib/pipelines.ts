@@ -15,6 +15,12 @@ export function isPipeline(value: unknown): value is PipelineId {
   return typeof value === "string" && IDS.has(value);
 }
 
+/** Whether any of the licence's calls run on Chakra Voice: its pipeline, or
+ * one an agent is pinned to. Only those calls use the managed LLM. */
+export function usesChakraVoice(client: { pipelines?: string[] | null; agent_pipelines?: Record<string, string> | null }): boolean {
+  return (client.pipelines ?? []).includes("chakra") || Object.values(client.agent_pipelines ?? {}).includes("chakra");
+}
+
 export function pipelineLabel(id: string | null | undefined): string {
   return PIPELINES.find((p) => p.id === id)?.label ?? "Not assigned";
 }
