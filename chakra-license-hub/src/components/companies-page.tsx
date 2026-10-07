@@ -3,16 +3,32 @@
 import { useState } from "react";
 
 import { useHub } from "./hub-context";
-import { Building, ChevronRight, Key, Plus, RefreshCw, Search } from "./icons";
-import { Badge, Button, Empty, Meter, Segmented, Skeleton, Spinner, inputClass } from "./ui";
-import { ago, compact, dateOnly, minutes, pct } from "@/lib/format";
-import { packageQuota } from "@/lib/packages";
+import { Building, ChevronRight, Clock, Mic, Plus, Search } from "./icons";
+import { Badge, Button, Empty, Meter, MiniStat, Segmented, Skeleton, inputClass } from "./ui";
+import { ago, compact, dateOnly, minutes, num, pct } from "@/lib/format";
+import { DEFAULT_PACKAGE, findPackage, packageLines, packageQuota } from "@/lib/packages";
+import { pipelineLabel } from "@/lib/pipelines";
+import type { Client } from "@/lib/types";
+
+/** "Chakra Voice", or "Chakra Voice +1 line" when a line runs another pipeline. */
+function voiceAi(c: Client): string {
+  const main = c.pipelines?.[0];
+  const others = Object.values(c.agent_pipelines ?? {}).filter((p) => p !== main).length;
+  return `${pipelineLabel(main)}${others ? ` +${others} line${others === 1 ? "" : "s"}` : ""}`;
+}
+
+/** The voice callers hear, in a few words. */
+function voiceSummary(c: Client): string {
+  const parts: string[] = [];
+  if (c.voice_modes?.includes("clone")) parts.push(c.has_custom_voice ? "Custom voice" : "Standard voice");
+  if (c.voice_modes?.includes("preset")) parts.push(c.gemini_voice ?? "App default");
+  return parts.join(" · ") || "Standard voice";
+}
 
 export default function CompaniesPage() {
-  const { clients, clientsLoaded, packages, navigate, rotateKey, now } = useHub();
+  const { clients, clientsLoaded, packages, navigate, now } = useHub();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "suspended">("all");
-  const [rotating, setRotating] = useState<number | null>(null);
 
   const shown = clients.filter(
     (c) =>
@@ -62,6 +78,7 @@ export default function CompaniesPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
           {shown.map((c) => {
             const quota = packageQuota(packages, c.package_name);
+            const included = findPackage(packages, c.package_name)?.calls;
             return (
               <article
                 key={c.id}
@@ -77,42 +94,35 @@ export default function CompaniesPage() {
                   <div className="min-w-0 flex-1">
                     <h3 className="text-[15px] font-semibold text-ink truncate group-hover:text-accent transition-colors">{c.company_name}</h3>
                     <div className="flex items-center gap-2 mt-1">
-                      <Badge tone="accent">{c.package_name || "Essential"}</Badge>
+                      <Badge tone="accent">{c.package_name || DEFAULT_PACKAGE}</Badge>
                       <Badge tone={c.is_active ? "good" : "critical"}>{c.is_active ? "Active" : "Suspended"}</Badge>
                     </div>
                   </div>
                   <ChevronRight size={16} className="text-ink-3 mt-1 group-hover:text-ink transition-colors" />
                 </div>
 
-                <div className="rounded-xl bg-panel-2 border border-line p-3">
-                  <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <span className="text-[11px] text-ink-3 inline-flex items-center gap-1.5">
-                      <Key size={12} /> Licence key
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={rotating === c.id}
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        setRotating(c.id);
-                        await rotateKey(c);
-                        setRotating(null);
-                      }}
-                      title="Keys are stored hashed and shown only once. Rotate to issue a new one."
-                    >
-                      {rotating === c.id ? <Spinner size={12} /> : <RefreshCw size={12} />} {rotating === c.id ? "Rotating…" : "Rotate"}
-                    </Button>
-                  </div>
-                  <div className="font-mono text-[12px] text-ink-2 truncate">{c.token_prefix ?? "chk_live_"}••••••••••••</div>
+                <div className="grid grid-cols-3 gap-2">
+                  <MiniStat label="Calls this month" value={included ? `${compact(c.month_calls ?? 0)} / ${compact(included)}` : num(c.month_calls ?? 0)} />
+                  <MiniStat label="Calls at once" value={packageLines(packages, c.package_name)} />
+                  <MiniStat label="Voice AI" value={<span className="text-[13px]">{voiceAi(c)}</span>} />
                 </div>
 
                 <Meter
                   value={c.month_minutes}
                   max={quota}
-                  label="This month"
+                  label="Minutes this month"
                   detail={`${minutes(c.month_minutes)} / ${compact(quota)} min · ${pct(c.month_minutes / quota)}`}
                 />
+
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-ink-2">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Mic size={12} className="text-ink-3" /> {voiceSummary(c)}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Clock size={12} className="text-ink-3" />
+                    {c.daily_limit_minutes ? `${c.daily_limit_minutes} min per caller a day` : "No daily talk-time limit"}
+                  </span>
+                </div>
 
                 <div className="flex items-center justify-between text-[11px] text-ink-3 pt-1 border-t border-line">
                   <span className="pt-3">Last activity {ago(c.last_activity, now)}</span>

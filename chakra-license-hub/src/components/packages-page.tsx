@@ -19,7 +19,7 @@ export default function PackagesPage() {
     if (!form.name.trim() || !form.max) return;
     setPackages((ps) => [
       ...ps,
-      { id: Math.random().toString(36).slice(2, 11), name: form.name.trim(), maxMinutes: Number(form.max), lines: Number(form.lines) || 14 },
+      { id: Math.random().toString(36).slice(2, 11), name: form.name.trim(), maxMinutes: Number(form.max), lines: Number(form.lines) || 7 },
     ]);
     setForm({ name: "", max: "", lines: "" });
   };
@@ -30,7 +30,7 @@ export default function PackagesPage() {
         <div className="space-y-3">
           <input className={inputClass} placeholder="Name, e.g. Premium" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} aria-label="Package name" />
           <input className={inputClass} type="number" placeholder="Monthly minutes, e.g. 50000" value={form.max} onChange={(e) => setForm({ ...form, max: e.target.value })} aria-label="Monthly minutes" />
-          <input className={inputClass} type="number" placeholder="Concurrent lines, e.g. 28" value={form.lines} onChange={(e) => setForm({ ...form, lines: e.target.value })} aria-label="Concurrent lines" />
+          <input className={inputClass} type="number" placeholder="Calls at once, e.g. 28" value={form.lines} onChange={(e) => setForm({ ...form, lines: e.target.value })} aria-label="Concurrent lines" />
           <Button variant="primary" className="w-full" onClick={add}>Add package</Button>
         </div>
       </Card>
@@ -63,9 +63,13 @@ export default function PackagesPage() {
                     </div>
                   </div>
                   <div className="mt-3 text-[15px] font-semibold text-ink">{p.name}</div>
-                  <div className="text-[12px] text-ink-2 tabular mt-0.5">{num(p.maxMinutes)} min / month</div>
+                  {p.special && <div className="text-[10px] uppercase tracking-wide text-accent mt-0.5">Special offer</div>}
+                  <div className="text-[12px] text-ink-2 tabular mt-1">
+                    {p.calls ? `Up to ${num(p.calls)} calls · ` : ""}{num(p.maxMinutes)} min / month
+                  </div>
+                  {p.priceLkr ? <div className="text-[13px] text-ink font-medium tabular mt-1.5">LKR {num(p.priceLkr)} <span className="text-[11px] text-ink-3 font-normal">/ month</span></div> : null}
                   <div className="text-[11px] text-ink-3 tabular mt-2">
-                    {p.lines} lines · {need.stt} STT + {need.tts} TTS GPUs · {users} compan{users === 1 ? "y" : "ies"}
+                    {p.lines} calls at once · {need.stt} STT + {need.tts} TTS GPUs · {users} compan{users === 1 ? "y" : "ies"}
                   </div>
                 </div>
               );

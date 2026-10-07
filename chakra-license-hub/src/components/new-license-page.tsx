@@ -6,13 +6,13 @@ import { licenseApi, useHub } from "./hub-context";
 import { Check, ChevronRight, Copy, Key, Plus } from "./icons";
 import { Button, Card, Spinner, cx, inputClass } from "./ui";
 import { compact, num } from "@/lib/format";
-import { gpusFor } from "@/lib/packages";
+import { DEFAULT_PACKAGE, gpusFor } from "@/lib/packages";
 import type { Client } from "@/lib/types";
 
 export default function NewLicensePage() {
   const { packages, setClients, navigate, toast } = useHub();
   const [companyName, setCompanyName] = useState("");
-  const [selected, setSelected] = useState("Essential");
+  const [selected, setSelected] = useState(DEFAULT_PACKAGE);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<{ client: Client; token: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -70,7 +70,7 @@ export default function NewLicensePage() {
                 >
                   <div className={cx("text-[13px] font-medium", selected === p.name ? "text-accent" : "text-ink")}>{p.name}</div>
                   <div className="text-[11px] text-ink-3 tabular">
-                    {compact(p.maxMinutes)} min · {p.lines} lines
+                    {p.calls ? `${compact(p.calls)} calls · ` : ""}{p.lines} at once
                   </div>
                 </button>
               ))}
@@ -108,7 +108,8 @@ export default function NewLicensePage() {
         ) : (
           <Card title="What this package needs">
             <div className="space-y-2 text-[13px]">
-              <Row label="Monthly speech minutes" value={pkg ? num(pkg.maxMinutes) : "–"} />
+              <Row label="Calls included per month" value={pkg?.calls ? num(pkg.calls) : "–"} />
+              <Row label="Maximum minutes per month" value={pkg ? num(pkg.maxMinutes) : "–"} />
               <Row label="Concurrent lines" value={pkg ? num(pkg.lines) : "–"} />
               <Row label="STT GPUs" value={num(need.stt)} />
               <Row label="TTS GPUs" value={num(need.tts)} />

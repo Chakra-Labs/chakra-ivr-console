@@ -4,6 +4,8 @@ import { currentViewer, forbidden, unauthorized, type Viewer } from "@/lib/auth"
 import { hasCallUsage, OFF_GATEWAY, pool, TIME_ZONE, usageSchema } from "@/lib/db";
 import { MAX_LIMIT_MINUTES, MAX_WARNING_SECONDS, wholeNumber } from "@/lib/daily-limit";
 import { isPipeline } from "@/lib/pipelines";
+import { isPresetVoice, voiceModes } from "@/lib/voice-rules";
+import { ensureVoiceTable } from "@/lib/voices";
 
 // Client API keys. Stored as SHA-256 hashes (see chakra-license-server
 // migrations/001_hash_tokens.sql): the full key is returned exactly once — when
@@ -13,13 +15,13 @@ import { isPipeline } from "@/lib/pipelines";
 // by itself whenever DATABASE_URL was missing.
 const MOCK = process.env.LICENSE_HUB_MOCK === "1";
 let mockLicenses: Record<string, unknown>[] = [
-  { id: 1, company_name: "AgroCorp Sri Lanka", token_prefix: "chk_live_agroco", is_active: true, month_minutes: 142, package_name: "Essential" },
-  { id: 2, company_name: "Island Tours Pvt Ltd", token_prefix: "chk_live_tour45", is_active: false, month_minutes: 1050, package_name: "Standard" },
+  { id: 1, company_name: "AgroCorp Sri Lanka", token_prefix: "chk_live_agroco", is_active: true, month_minutes: 142, package_name: "Starter" },
+  { id: 2, company_name: "Island Tours Pvt Ltd", token_prefix: "chk_live_tour45", is_active: false, month_minutes: 1050, package_name: "Growth" },
 ];
 
 const PUBLIC_COLUMNS =
   "id, company_name, token_prefix, is_active, used_minutes, package_name, pipelines, agent_pipelines, " +
-  "daily_limit_minutes, limit_warning_seconds, agent_daily_limits, created_at";
+  "daily_limit_minutes, limit_warning_seconds, agent_daily_limits, gemini_voice, created_at";
 
 function newKey() {
   const token = `chk_live_${crypto.randomBytes(32).toString("hex")}`;
@@ -36,10 +38,16 @@ function adminOnly(viewer: Viewer | null): Response | null {
   return viewer.role === "admin" ? null : forbidden();
 }
 
-/** A licence row as a company account may see it: not which voice pipelines
- * (technologies) it runs. Admins get the row as it is. */
-function forViewer<T extends Record<string, unknown>>(row: T, viewer: Viewer): T {
-  return viewer.role === "company" ? { ...row, pipelines: [], agent_pipelines: {} } : row;
+/** A licence row for whoever asks. Everyone gets `voice_modes` (the kinds of
+ * voice its lines use) and a clean `gemini_voice`. A company account does not
+ * get which voice pipelines (technologies) it runs; admins do. */
+function forViewer<T extends Record<string, unknown>>(row: T, viewer: Viewer) {
+  const shaped = {
+    ...row,
+    voice_modes: voiceModes(row.pipelines, row.agent_pipelines),
+    gemini_voice: isPresetVoice(row.gemini_voice) ? row.gemini_voice : null,
+  };
+  return viewer.role === "company" ? { ...shaped, pipelines: [], agent_pipelines: {} } : shaped;
 }
 
 function noDatabase(): Response {
@@ -82,15 +90,30 @@ export async function GET() {
         `SELECT ${PUBLIC_COLUMNS} FROM licenses WHERE ($1::int IS NULL OR id = $1) ORDER BY created_at DESC`,
         [only],
       );
-      return Response.json(result.rows.map((r) => forViewer({ ...r, month_minutes: 0, last_activity: null }, viewer)));
+      return Response.json(
+        result.rows.map((r) => forViewer({ ...r, month_minutes: 0, month_calls: 0, has_custom_voice: false, last_activity: null }, viewer)),
+      );
     }
+    await ensureVoiceTable();
     // Plus the call minutes of calls that bypass the gateway (see OFF_GATEWAY).
     const calls = await hasCallUsage();
     const result = await pool.query(
       `SELECT ${PUBLIC_COLUMNS.split(", ").map((c) => `l.${c}`).join(", ")},
               (COALESCE(u.month_minutes, 0) + COALESCE(c.month_minutes, 0))::float8 AS month_minutes,
-              GREATEST(a.last_activity, c.last_activity) AS last_activity
+              COALESCE(k.month_calls, 0)::int AS month_calls,
+              EXISTS (SELECT 1 FROM license_voices v WHERE v.license_id = l.id) AS has_custom_voice,
+              GREATEST(a.last_activity, c.last_activity, k.last_activity) AS last_activity
        FROM licenses l
+       LEFT JOIN (
+         ${
+           calls
+             ? `SELECT license_id,
+                  SUM(calls) FILTER (WHERE hour >= date_trunc('month', now() AT TIME ZONE $1) AT TIME ZONE $1) AS month_calls,
+                  MAX(hour) AS last_activity
+                FROM call_usage GROUP BY license_id`
+             : "SELECT NULL::int AS license_id, NULL::bigint AS month_calls, NULL::timestamptz AS last_activity"
+         }
+       ) k ON k.license_id = l.id
        LEFT JOIN (
          SELECT license_id, SUM(stt_seconds + tts_seconds) / 60 AS month_minutes
          FROM speech_usage
@@ -135,7 +158,7 @@ export async function POST(request: Request) {
 
   const key = newKey();
   if (MOCK) {
-    const row = { id: Date.now(), company_name: companyName, token_prefix: key.prefix, is_active: true, used_minutes: 0, package_name: packageName || "Essential" };
+    const row = { id: Date.now(), company_name: companyName, token_prefix: key.prefix, is_active: true, used_minutes: 0, package_name: packageName || "Starter" };
     mockLicenses = [row, ...mockLicenses];
     return Response.json({ ...row, token: key.token });
   }
@@ -144,7 +167,7 @@ export async function POST(request: Request) {
     const result = await pool.query(
       `INSERT INTO licenses (token_hash, token_prefix, company_name, is_active, used_minutes, package_name, created_at)
        VALUES ($1, $2, $3, TRUE, 0, $4, NOW()) RETURNING ${PUBLIC_COLUMNS}`,
-      [key.hash, key.prefix, companyName, packageName || "Essential"],
+      [key.hash, key.prefix, companyName, packageName || "Starter"],
     );
     // The only response that ever carries the full key.
     return Response.json({ ...result.rows[0], token: key.token });
@@ -279,6 +302,8 @@ export async function DELETE(request: Request) {
   }
   if (!pool) return noDatabase();
   try {
+    await ensureVoiceTable();
+    await pool.query("DELETE FROM license_voices WHERE license_id = $1", [id]);
     await pool.query("DELETE FROM licenses WHERE id = $1", [id]);
     return Response.json({ success: true });
   } catch (error) {

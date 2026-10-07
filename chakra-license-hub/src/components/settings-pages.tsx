@@ -2,24 +2,27 @@
 
 // Settings pages.
 //
-// Admins: "Licence settings" (Customers) — one company at a time, in sections:
-// company & package, voice pipeline, daily talk time, the customer's IVR Console
-// sign-in, licence status & key, and deleting the licence.
+// Admins, one company at a time:
+//  - "Company settings": company & package, voice pipeline, the voice callers
+//    hear, and daily talk time: how the company's lines behave.
+//  - "Licences & sign-in" (licences-page.tsx) uses the cards exported here: the
+//    customer's IVR Console sign-in, licence status & key, deleting the licence.
 //
-// A company account: "Talk-time limit" (its daily limit per caller) and
-// "Account" (its licence details and password). The server enforces the same
-// split (api/licenses, api/console-users, api/auth/password).
+// A company account: "Talk-time limit", "Voice" and "Account" (its licence
+// details and password). The server enforces the same split (api/licenses,
+// api/voice, api/console-users, api/auth/password).
 import { useEffect, useState } from "react";
 
 import { licenseApi, signedOut, useHub } from "./hub-context";
-import { AlertTriangle, Building, Clock, Copy, Key, RefreshCw, Trash2 } from "./icons";
+import { AlertTriangle, Building, Clock, Copy, Key, Phone, Plus, RefreshCw, Trash2, X } from "./icons";
 import { Badge, Button, Card, Empty, KeyValue, LinesSkeleton, Spinner, cx, inputClass } from "./ui";
 import { MIN_PASSWORD } from "@/lib/account-rules";
 import { MAX_LIMIT_MINUTES, MAX_WARNING_SECONDS, formatAgentLimits, parseAgentLimits, wholeNumber } from "@/lib/daily-limit";
 import { ago, compact, dateOnly, dateTime } from "@/lib/format";
 import { track } from "@/lib/loading";
-import { findPackage } from "@/lib/packages";
-import { PIPELINES, formatAgentPins, parseAgentPins } from "@/lib/pipelines";
+import { DEFAULT_PACKAGE, findPackage } from "@/lib/packages";
+import { PIPELINES, isPipeline, pipelineLabel } from "@/lib/pipelines";
+import { VoiceEditor } from "./voice-settings";
 import type { Client, ConsoleAccount } from "@/lib/types";
 
 // ── shared pieces ────────────────────────────────────────────────────────────
@@ -32,7 +35,14 @@ function useLicenceUpdate(client: Client) {
     setBusy(what);
     try {
       const row = await licenseApi<Partial<Client>>("PUT", { id: client.id, ...body });
-      setClients((cs) => cs.map((c) => (c.id === client.id ? { ...c, ...row, month_minutes: c.month_minutes, last_activity: c.last_activity } : c)));
+      // The usage figures come from the list query, not from an update's reply.
+      setClients((cs) =>
+        cs.map((c) =>
+          c.id === client.id
+            ? { ...c, ...row, month_minutes: c.month_minutes, month_calls: c.month_calls, has_custom_voice: c.has_custom_voice, last_activity: c.last_activity }
+            : c,
+        ),
+      );
       toast(`${what} saved`, "success");
       return true;
     } catch (e) {
@@ -237,9 +247,9 @@ export function TalkTimeEditor({
   );
 }
 
-// ── admins: Licence settings ─────────────────────────────────────────────────
+// ── admins: Company settings ─────────────────────────────────────────────────
 
-export default function LicenceSettingsPage({ id }: { id?: number }) {
+export default function CompanySettingsPage({ id }: { id?: number }) {
   const { clients, clientsLoaded, navigate } = useHub();
 
   if (!clientsLoaded) return <SettingsSkeleton />;
@@ -258,7 +268,7 @@ export default function LicenceSettingsPage({ id }: { id?: number }) {
             id="settings-company"
             className={inputClass}
             value={client.id}
-            onChange={(e) => navigate({ page: "manage", id: Number(e.target.value) })}
+            onChange={(e) => navigate({ page: "settings", id: Number(e.target.value) })}
           >
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
@@ -268,11 +278,14 @@ export default function LicenceSettingsPage({ id }: { id?: number }) {
             ))}
           </select>
         </div>
-        <Badge tone="accent">{client.package_name || "Essential"}</Badge>
+        <Badge tone="accent">{client.package_name || DEFAULT_PACKAGE}</Badge>
         <Badge tone={client.is_active ? "good" : "critical"}>{client.is_active ? "Active" : "Suspended"}</Badge>
         <div className="flex-1" />
         <Button variant="ghost" onClick={() => navigate({ page: "company", id: client.id })}>
           View dashboard
+        </Button>
+        <Button onClick={() => navigate({ page: "licences", id: client.id })}>
+          <Key size={14} /> Licence &amp; sign-in
         </Button>
       </section>
 
@@ -280,12 +293,10 @@ export default function LicenceSettingsPage({ id }: { id?: number }) {
         <div className="xl:col-span-7 space-y-4">
           <CompanyPackageCard client={client} />
           <PipelineCard client={client} />
-          <TalkTimeCard client={client} />
+          <VoiceCard client={client} />
         </div>
         <div className="xl:col-span-5 space-y-4">
-          <ConsoleAccessCard client={client} />
-          <StatusKeyCard client={client} />
-          <DangerCard client={client} />
+          <TalkTimeCard client={client} />
         </div>
       </div>
     </div>
@@ -296,7 +307,8 @@ function CompanyPackageCard({ client }: { client: Client }) {
   const { packages } = useHub();
   const { busy, update } = useLicenceUpdate(client);
   const [name, setName] = useState(client.company_name);
-  const [pkg, setPkg] = useState(findPackage(packages, client.package_name)?.name ?? client.package_name ?? "Essential");
+  const [pkg, setPkg] = useState(findPackage(packages, client.package_name)?.name ?? client.package_name ?? DEFAULT_PACKAGE);
+  const known = packages.some((p) => p.name === pkg);
 
   return (
     <Card title="Company & package" subtitle="How the company is named, and what it has bought">
@@ -317,9 +329,10 @@ function CompanyPackageCard({ client }: { client: Client }) {
           <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor="company-package">Package</label>
           <div className="flex gap-2">
             <select id="company-package" className={inputClass} value={pkg} onChange={(e) => setPkg(e.target.value)}>
+              {!known && <option value={pkg}>{pkg} (not on the price sheet)</option>}
               {packages.map((p) => (
                 <option key={p.id} value={p.name}>
-                  {p.name} · {compact(p.maxMinutes)} min · {p.lines} lines
+                  {p.name} · {p.calls ? `${compact(p.calls)} calls · ` : ""}{compact(p.maxMinutes)} min · {p.lines} at once
                 </option>
               ))}
             </select>
@@ -334,21 +347,32 @@ function CompanyPackageCard({ client }: { client: Client }) {
   );
 }
 
+type LineRule = { agent: string; pipeline: string };
+
+/** Which voice AI the company's phone lines run: one for all of them, and any
+ * named line ("agent") that runs the other. */
 function PipelineCard({ client }: { client: Client }) {
   const { busy, update } = useLicenceUpdate(client);
-  const current = client.pipelines ?? [];
-  const [primary, setPrimary] = useState<string>(current[0] ?? "");
-  const [alsoOther, setAlsoOther] = useState(current.length > 1);
-  const [pins, setPins] = useState(formatAgentPins(client.agent_pipelines));
-  const other = PIPELINES.find((p) => p.id !== primary);
-  const next = primary ? [primary, ...(alsoOther && other ? [other.id] : [])] : [];
-  const nextPins = parseAgentPins(pins);
-  const unchanged = JSON.stringify(next) === JSON.stringify(current) && JSON.stringify(nextPins) === JSON.stringify(client.agent_pipelines ?? {});
+  const savedDefault = client.pipelines?.[0] ?? "";
+  const savedRules = client.agent_pipelines ?? {};
+  const [primary, setPrimary] = useState<string>(savedDefault);
+  const [rules, setRules] = useState<LineRule[]>(Object.entries(savedRules).map(([agent, pipeline]) => ({ agent, pipeline })));
+
+  const other = PIPELINES.find((p) => p.id !== primary)?.id ?? PIPELINES[0].id;
+  const pins: Record<string, string> = {};
+  for (const r of rules) if (r.agent.trim() && isPipeline(r.pipeline)) pins[r.agent.trim()] = r.pipeline;
+  // The licence lists its default first, then any other pipeline a line uses.
+  const next = primary ? [primary, ...PIPELINES.map((p) => p.id).filter((id) => id !== primary && Object.values(pins).includes(id))] : [];
+  const sorted = (o: Record<string, string>) => JSON.stringify(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
+  const unchanged = primary === savedDefault && sorted(pins) === sorted(savedRules);
+  const different = Object.entries(pins).filter(([, pipeline]) => pipeline !== primary);
+  const setRule = (at: number, change: Partial<LineRule>) => setRules((rs) => rs.map((r, n) => (n === at ? { ...r, ...change } : r)));
 
   return (
-    <Card title="Voice pipeline" subtitle="Which voice AI the company's agents run. Only Chakra Labs can change this.">
+    <Card title="Voice pipeline" subtitle="Which voice AI answers the company's calls. Only Chakra Labs can change this.">
+      <div className="text-[12px] text-ink-2 mb-2">For all of the company&apos;s phone lines</div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {[{ id: "", label: "Not assigned", detail: "The company's own configuration decides" }, ...PIPELINES].map((p) => (
+        {[...PIPELINES, { id: "", label: "Not assigned", detail: "The company's own app configuration decides" }].map((p) => (
           <label
             key={p.id || "none"}
             className={cx(
@@ -365,31 +389,101 @@ function PipelineCard({ client }: { client: Client }) {
           </label>
         ))}
       </div>
-      {primary && other && (
-        <label className="mt-3 flex items-center gap-2 text-[12px] text-ink-2">
-          <input type="checkbox" checked={alsoOther} onChange={(e) => setAlsoOther(e.target.checked)} />
-          Also allow {other.label}, for agents pinned to it
-        </label>
-      )}
-      <details className="mt-3 rounded-xl border border-line" open={Object.keys(nextPins).length > 0}>
-        <summary className="cursor-pointer select-none px-4 py-3 text-[13px] text-ink-2 hover:text-ink">Pin specific agents to a pipeline</summary>
-        <div className="px-4 pb-4">
-          <textarea
-            aria-label="Agent pipeline pins"
-            className={cx(inputClass, "font-mono text-[12px] min-h-[64px]")}
-            value={pins}
-            placeholder="sayury-ai = chakra"
-            onChange={(e) => setPins(e.target.value)}
-          />
-          <p className="text-[11px] text-ink-3 mt-1.5">One per line: agent = chakra | gemini_live. A pin always wins.</p>
+
+      <div className="mt-5 rounded-xl border border-line p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[13px] font-medium text-ink inline-flex items-center gap-2">
+            <Phone size={14} className="text-ink-3" /> Lines that use a different voice AI
+          </div>
+          <span className="text-[11px] text-ink-3">optional</span>
         </div>
-      </details>
+        <p className="text-[12px] text-ink-3 mt-1.5 leading-relaxed">
+          Each phone line of the company runs as an &ldquo;agent&rdquo; with its own name, set in the company&apos;s app (for
+          example <span className="font-mono text-ink-2">test-agent-ta</span> for a Tamil line). Every line uses the voice AI
+          chosen above. To run one line on the other voice AI, add its agent name here.
+        </p>
+        {rules.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {rules.map((r, at) => (
+              <div key={at} className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                <input
+                  aria-label="Agent name"
+                  className={cx(inputClass, "font-mono text-[12px]")}
+                  value={r.agent}
+                  placeholder="Agent name, e.g. sayuru-ai-tamil"
+                  onChange={(e) => setRule(at, { agent: e.target.value })}
+                  spellCheck={false}
+                />
+                <span className="text-[12px] text-ink-3 shrink-0">uses</span>
+                <select
+                  aria-label="Voice AI for this line"
+                  className={cx(inputClass, "sm:w-44 shrink-0")}
+                  value={r.pipeline}
+                  onChange={(e) => setRule(at, { pipeline: e.target.value })}
+                >
+                  {PIPELINES.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  aria-label="Remove this line"
+                  className="p-2 rounded-lg text-ink-3 hover:text-critical hover:bg-critical/10 shrink-0"
+                  onClick={() => setRules((rs) => rs.filter((_, n) => n !== at))}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <Button size="sm" className="mt-3" onClick={() => setRules((rs) => [...rs, { agent: "", pipeline: other }])}>
+          <Plus size={13} /> Add a line
+        </Button>
+      </div>
+
+      <div className="mt-4 flex items-start gap-3 p-4 rounded-xl border border-accent/25 bg-accent/[0.05]">
+        <Building size={16} className="text-accent mt-0.5 shrink-0" />
+        <p className="text-[13px] text-ink-2 leading-relaxed">
+          {primary ? (
+            <>
+              {different.length ? "Lines use " : "Every line uses "}
+              <span className="text-ink font-medium">{pipelineLabel(primary)}</span>
+            </>
+          ) : (
+            <>Each line uses what the company&apos;s app is configured for</>
+          )}
+          {different.length > 0 && (
+            <>
+              , except{" "}
+              {different.map(([agent, pipeline], n) => (
+                <span key={agent}>
+                  {n > 0 && (n === different.length - 1 ? " and " : ", ")}
+                  <span className="font-mono text-ink">{agent}</span> ({pipelineLabel(pipeline)})
+                </span>
+              ))}
+            </>
+          )}
+          .
+        </p>
+      </div>
+
       <div className="flex items-center justify-between gap-3 mt-4">
-        <span className="text-[11px] text-ink-3">Read from the signed licence check: running agents switch within 10 minutes.</span>
-        <Button variant="primary" disabled={unchanged || busy !== null} onClick={() => update({ action: "pipelines", pipelines: next, agentPipelines: nextPins }, "Voice pipeline")}>
+        <span className="text-[11px] text-ink-3">Running agents switch within 10 minutes. No redeploy is needed.</span>
+        <Button variant="primary" disabled={unchanged || busy !== null} onClick={() => update({ action: "pipelines", pipelines: next, agentPipelines: pins }, "Voice pipeline")}>
           {busy && <Spinner size={13} />} Save
         </Button>
       </div>
+    </Card>
+  );
+}
+
+function VoiceCard({ client }: { client: Client }) {
+  return (
+    <Card title="Voice" subtitle="The voice callers hear. The company can also change this from its own account.">
+      <VoiceEditor client={client} technical />
     </Card>
   );
 }
@@ -403,7 +497,7 @@ function TalkTimeCard({ client }: { client: Client }) {
   );
 }
 
-function StatusKeyCard({ client }: { client: Client }) {
+export function StatusKeyCard({ client }: { client: Client }) {
   const { rotateKey } = useHub();
   const { busy, setBusy, update } = useLicenceUpdate(client);
   return (
@@ -447,7 +541,7 @@ function StatusKeyCard({ client }: { client: Client }) {
   );
 }
 
-function DangerCard({ client }: { client: Client }) {
+export function DangerCard({ client }: { client: Client }) {
   const { setClients, toast, navigate } = useHub();
   const [busy, setBusy] = useState(false);
   const remove = async () => {
@@ -530,7 +624,7 @@ export function AccountPage() {
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
       <Card title="Your licence" subtitle="Managed by Chakra Labs">
         <KeyValue label="Company">{client.company_name}</KeyValue>
-        <KeyValue label="Package">{client.package_name || "Essential"}</KeyValue>
+        <KeyValue label="Package">{client.package_name || DEFAULT_PACKAGE}</KeyValue>
         <KeyValue label="Status">
           <Badge tone={client.is_active ? "good" : "critical"}>{client.is_active ? "Active" : "Suspended"}</Badge>
         </KeyValue>
@@ -545,7 +639,35 @@ export function AccountPage() {
   );
 }
 
-function SettingsSkeleton() {
+export function VoicePage() {
+  const client = useOwnLicence();
+  if (client === undefined) return <SettingsSkeleton />;
+  if (!client) return <Empty>Your licence could not be loaded.</Empty>;
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+      <Card className="xl:col-span-8" title="Agent voice" subtitle="The voice your callers hear">
+        <VoiceEditor key={client.id} client={client} technical={false} />
+      </Card>
+      <Card className="xl:col-span-4" title="Good to know">
+        <ul className="space-y-3 text-[13px] text-ink-2">
+          {[
+            "A change reaches your phone lines within a few minutes. No restart is needed.",
+            "Calls already in progress keep the voice they started with.",
+            "You can go back to the standard voice at any time.",
+            "To change anything else about how your agent sounds or speaks, contact Chakra Labs.",
+          ].map((t) => (
+            <li key={t} className="flex gap-2.5">
+              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
+              <span>{t}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
+  );
+}
+
+export function SettingsSkeleton() {
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4" aria-busy="true">
       {[0, 1].map((i) => (
@@ -582,7 +704,7 @@ function generatePassword(): string {
   return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
 }
 
-function ConsoleAccessCard({ client }: { client: Client }) {
+export function ConsoleAccessCard({ client }: { client: Client }) {
   const { toast, now } = useHub();
   const [account, setAccount] = useState<ConsoleAccount | null | undefined>(undefined);
   const [email, setEmail] = useState("");
@@ -764,8 +886,9 @@ function ConsoleAccessCard({ client }: { client: Client }) {
           )}
 
           <p className="text-[11px] text-ink-3">
-            With this sign-in the company sees its own dashboard and licence, and can set its daily talk time and its own
-            password. It cannot change the voice pipeline, package, name, status or key, or see other companies or the GPUs.
+            With this sign-in the company sees its own dashboard and licence, and can set its daily talk time, its
+            agent&apos;s voice and its own password. It cannot change the voice pipeline, package, name, status or key, or
+            see other companies or the GPUs.
           </p>
         </div>
       )}

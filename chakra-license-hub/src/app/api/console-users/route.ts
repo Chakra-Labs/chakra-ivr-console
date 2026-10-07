@@ -6,6 +6,7 @@ import { hashPassword } from "@/lib/password";
 // A company's IVR Console account, managed by an admin (admins only).
 //
 //   GET    /api/console-users?license=7   the account, or null
+//   GET    /api/console-users             every account (for the licence cards)
 //   PUT    { licenseId, email?, password?, isActive? }   create, or change any of these
 //   DELETE { licenseId }                    remove the account
 //
@@ -27,7 +28,18 @@ export async function GET(request: Request) {
   const refused = await refuseNonAdmin();
   if (refused) return refused;
   if (!pool) return bad("DATABASE_URL is not configured", 500);
-  const licenseId = Number(new URL(request.url).searchParams.get("license"));
+  const asked = new URL(request.url).searchParams.get("license");
+  if (asked === null) {
+    try {
+      await ensureTable();
+      const { rows } = await pool.query("SELECT * FROM console_users ORDER BY license_id");
+      return Response.json(rows.map(view));
+    } catch (error) {
+      console.error("console-users GET:", error);
+      return bad("Failed to load the accounts", 500);
+    }
+  }
+  const licenseId = Number(asked);
   if (!Number.isInteger(licenseId)) return bad("license is required");
   try {
     const user = await byLicense(licenseId);

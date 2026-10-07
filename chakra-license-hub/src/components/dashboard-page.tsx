@@ -9,7 +9,7 @@ import { AlertOctagon, AlertTriangle, Building, CheckCircle, ChevronRight, Clock
 import { Badge, Button, Card, ChartSkeleton, Empty, ErrorBanner, LinesSkeleton, Meter, MiniStat, Ring, Segmented, Skeleton, Stat, cx } from "./ui";
 import { gpuPrice } from "@/lib/fleet-health";
 import { compact, dayLabel, money, minutes, num, pct, signedPct } from "@/lib/format";
-import { packageQuota } from "@/lib/packages";
+import { DEFAULT_PACKAGE, packageQuota } from "@/lib/packages";
 import type { Analytics, LicenseUsage } from "@/lib/types";
 
 const HOURS_PER_MONTH = 730;
@@ -210,7 +210,7 @@ export default function DashboardPage() {
                     <span className="min-w-0 flex-1">
                       <span className="block text-[13px] text-ink truncate">{c.company_name}</span>
                       <span className="block text-[11px] text-ink-3">
-                        {c.package_name || "Essential"} · {minutes(c.month_minutes)} min
+                        {c.package_name || DEFAULT_PACKAGE} · {minutes(c.month_minutes)} min
                       </span>
                     </span>
                     <Badge tone={c.is_active ? "good" : "critical"}>{c.is_active ? "Active" : "Suspended"}</Badge>

@@ -1,13 +1,16 @@
-# Push to `staging` -> build the admin hub and license server images (the hub
-# build type-checks) -> push to ECR -> roll them on the fleet control host via
-# AWS SSM (licenses migration 001 runs first; it is additive).
+# Push to `staging` -> tests (licence server and hub against a real Postgres:
+# tests/) -> build the admin hub and license server images -> push to ECR ->
+# roll them on the fleet control host via AWS SSM (licenses migration 001 runs
+# first; it is additive).
+#
+# A push to a `ci/...` branch runs the tests only: nothing is deployed.
 #
 # AWS access is GitHub OIDC -> role chakra-fleet-github-deploy.
 name: deploy
 
 on:
   push:
-    branches: [staging]
+    branches: [staging, "ci/**"]
   workflow_dispatch:
 
 permissions:
@@ -25,7 +28,38 @@ env:
   INSTANCE_ID: i-0a3746e73b44aafc5
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: console
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:test@localhost:5432/console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Licence server
+        working-directory: chakra-license-server
+        run: |
+          pip install -q -r requirements.txt
+          python ../tests/license_server_e2e.py
+      - name: Hub (lint, types, build, HTTP checks)
+        run: bash tests/hub_e2e.sh
+
   deploy:
+    needs: test
+    if: github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

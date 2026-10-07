@@ -43,6 +43,9 @@ PIPELINE_COLUMNS = (
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS daily_limit_minutes INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS limit_warning_seconds INTEGER NOT NULL DEFAULT 60",
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS agent_daily_limits JSONB NOT NULL DEFAULT '{}'::jsonb",
+    # Added 2026-10-07: the voice callers hear. Gemini Live lines: a preset name.
+    # The preset voice of the licence's Gemini Live lines (NULL = the app's own).
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS gemini_voice TEXT",
 )
 
 
@@ -62,6 +65,25 @@ CREATE TABLE IF NOT EXISTS console_users (
 """
 
 
+# Added 2026-10-07: a licence's own Chakra TTS voice, a reference clip and its
+# transcript uploaded in IVR Console and read by the speech gateway (the hub's
+# src/lib/voices.ts and chakra-gpu-fleet's schema.sql create it too).
+LICENSE_VOICES = """
+CREATE TABLE IF NOT EXISTS license_voices (
+    license_id    INTEGER PRIMARY KEY,
+    voice_id      TEXT NOT NULL,
+    audio         BYTEA NOT NULL,
+    transcript    TEXT NOT NULL,
+    seconds       REAL NOT NULL DEFAULT 0,
+    file_name     TEXT,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    status_detail TEXT NOT NULL DEFAULT '',
+    updated_by    TEXT,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+"""
+
+
 async def init_db() -> None:
     url = os.getenv("DATABASE_URL", "").strip()
     if not url:
@@ -72,6 +94,7 @@ async def init_db() -> None:
         for statement in PIPELINE_COLUMNS:
             await conn.execute(statement)
         await conn.execute(CONSOLE_USERS)
+        await conn.execute(LICENSE_VOICES)
         # Only the additive migration runs automatically; 002 (drop plaintext
         # keys) is irreversible and run by hand once hashed lookups are live.
         for path in MIGRATIONS:

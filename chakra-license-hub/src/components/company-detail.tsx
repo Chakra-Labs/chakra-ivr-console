@@ -9,7 +9,7 @@ import { useAnalytics, useHub } from "./hub-context";
 import { AlertTriangle, ArrowLeft, Building, Calendar, Clock, Gauge, Settings, Zap } from "./icons";
 import { Badge, Button, Card, ChartSkeleton, Empty, ErrorBanner, KeyValue, LinesSkeleton, Meter, MiniStat, Segmented, Skeleton, Stat, cx } from "./ui";
 import { ago, compact, dateOnly, dateTime, dayLabel, minutes, num, pct, signedPct } from "@/lib/format";
-import { INFLIGHT_PER_LINE, gpusFor, packageLines, packageQuota } from "@/lib/packages";
+import { DEFAULT_PACKAGE, INFLIGHT_PER_LINE, gpusFor, packageLines, packageQuota } from "@/lib/packages";
 import { describeLimit } from "@/lib/daily-limit";
 import { pipelineLabel } from "@/lib/pipelines";
 import type { Client, LicenseUsage } from "@/lib/types";
@@ -76,7 +76,7 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
         <div className="min-w-0 flex-1">
           <h2 className="text-[20px] font-semibold text-ink truncate">{client.company_name}</h2>
           <div className="flex flex-wrap items-center gap-2 mt-1.5">
-            <Badge tone="accent">{client.package_name || "Essential"}</Badge>
+            <Badge tone="accent">{client.package_name || DEFAULT_PACKAGE}</Badge>
             <Badge tone={client.is_active ? "good" : "critical"}>{client.is_active ? "Active" : "Suspended"}</Badge>
             <span className="text-[12px] text-ink-3 font-mono">{client.token_prefix ?? "chk_live_"}…</span>
           </div>
@@ -94,8 +94,8 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
             <Clock size={14} /> Talk-time limit
           </Button>
         ) : (
-          <Button onClick={() => navigate({ page: "manage", id: client.id })}>
-            <Settings size={14} /> Licence settings
+          <Button onClick={() => navigate({ page: "settings", id: client.id })}>
+            <Settings size={14} /> Company settings
           </Button>
         )}
       </section>
@@ -149,7 +149,7 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card title="Overview & package">
-          <KeyValue label="Package">{client.package_name || "Essential"}</KeyValue>
+          <KeyValue label="Package">{client.package_name || DEFAULT_PACKAGE}</KeyValue>
           <KeyValue label="Monthly minutes">{num(quota)} min</KeyValue>
           <KeyValue label="Concurrent lines">{num(lines)}</KeyValue>
           {!companyView && (
@@ -357,7 +357,7 @@ function CapacityCard({ client, lines, usage }: { client: Client; lines: number;
   const limit = lines * INFLIGHT_PER_LINE;
   const share = capacity && capacity.total_lines ? lines / capacity.total_lines : null;
   return (
-    <Card title="GPU capacity used" subtitle={`${client.package_name || "Essential"}: ${num(lines)} concurrent lines`}>
+    <Card title="GPU capacity used" subtitle={`${client.package_name || DEFAULT_PACKAGE}: ${num(lines)} concurrent lines`}>
       <div className="grid grid-cols-3 gap-3">
         <MiniStat label="STT GPUs needed" value={num(need.stt)} />
         <MiniStat label="TTS GPUs needed" value={num(need.tts)} />

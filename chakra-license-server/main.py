@@ -42,7 +42,7 @@ MOCK_VALID_TOKENS = {"chk_live_test123": True, "chk_live_unpaid456": False}
 
 LOOKUP = """
     SELECT id, company_name, package_name, is_active, pipelines, agent_pipelines,
-           daily_limit_minutes, limit_warning_seconds, agent_daily_limits FROM licenses
+           daily_limit_minutes, limit_warning_seconds, agent_daily_limits, gemini_voice FROM licenses
     WHERE token_hash = $1 OR (token_hash IS NULL AND token = $2)
 """
 
@@ -59,6 +59,13 @@ CREATE TABLE IF NOT EXISTS call_usage (
 
 PIPELINES = {"chakra", "gemini_live", "unknown"}
 
+# The preset voices IVR Console offers for Gemini Live lines (the hub's
+# src/lib/voice-rules.ts has the same list).
+GEMINI_VOICES = {
+    "Leda", "Orus", "Alnilam", "Sadachbia", "Algenib",
+    "Sadaltager", "Laomedeia", "Zubenelgenubi", "Algieba", "Despina",
+}  # fmt: skip
+
 PIPELINE_COLUMNS = (
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS pipelines TEXT[] NOT NULL DEFAULT '{}'",
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS agent_pipelines JSONB NOT NULL DEFAULT '{}'::jsonb",
@@ -67,6 +74,8 @@ PIPELINE_COLUMNS = (
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS daily_limit_minutes INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS limit_warning_seconds INTEGER NOT NULL DEFAULT 60",
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS agent_daily_limits JSONB NOT NULL DEFAULT '{}'::jsonb",
+    # The preset voice of the licence's Gemini Live lines (NULL = the app's own).
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS gemini_voice TEXT",
 )
 
 
@@ -214,7 +223,7 @@ async def verify_signed(req: VerifyRequest):
     if db_pool is None:
         if MOCK_VALID_TOKENS.get(req.token) is not True:
             raise _refuse()
-        row = {"id": 0, "company_name": "Test Company", "package_name": "Essential", "is_active": True}
+        row = {"id": 0, "company_name": "Test Company", "package_name": "Starter", "is_active": True}
     else:
         row = await _lookup(req.token)
         if not row or not row["is_active"]:
@@ -236,6 +245,10 @@ async def verify_signed(req: VerifyRequest):
         "daily_limit_seconds": daily_limit,
         "limit_warning_seconds": limit_warning,
         "agent_daily_limits": agent_daily_limits,
+        # The voice of the licence's Gemini Live lines, chosen in IVR Console
+        # ("" = the app's own setting); chakra-ivr-core 0.6+ uses it. The voice
+        # of Chakra Voice lines is a reference clip, applied at the speech gateway.
+        "gemini_voice": voice if (voice := row.get("gemini_voice")) in GEMINI_VOICES else "",
         "key_hash": key_hash(req.token),
         "nonce": req.nonce,
         "issued_at": int(time.time()),

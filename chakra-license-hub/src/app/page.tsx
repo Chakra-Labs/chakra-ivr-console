@@ -2,8 +2,8 @@
 
 // IVR Console's shell: sidebar, header, routing (#hash), shared data.
 // Signing in is enforced on the server (proxy.ts + every API route). An admin
-// sees everything; a company account sees its own dashboard, talk-time limit
-// and account only (the API refuses it anything else, whatever this page shows).
+// sees everything; a company account sees its own dashboard, talk-time limit,
+// voice and account only (the API refuses it anything else, whatever this page shows).
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -17,30 +17,33 @@ import FleetPage from "@/components/fleet-page";
 import GpuPage from "@/components/gpu-page";
 import { Header } from "@/components/header";
 import { HubContext, licenseApi, parseRoute, routeHash, type Hub, type Route } from "@/components/hub-context";
-import { Activity, Box, Building, Check, Clock, Copy, Key, LayoutDashboard, Lock, Server, Settings, X } from "@/components/icons";
-import LicenceSettingsPage, { AccountPage, TalkTimePage } from "@/components/settings-pages";
+import { Activity, Box, Building, Check, Clock, Copy, Key, LayoutDashboard, Lock, Mic, Server, Settings, X } from "@/components/icons";
+import LicencesPage from "@/components/licences-page";
+import CompanySettingsPage, { AccountPage, TalkTimePage, VoicePage } from "@/components/settings-pages";
 import NewLicensePage from "@/components/new-license-page";
 import PackagesPage from "@/components/packages-page";
 import { Button, Spinner, cx } from "@/components/ui";
-import { DEFAULT_PACKAGES, type Package } from "@/lib/packages";
+import { DEFAULT_PACKAGE, DEFAULT_PACKAGES, type Package } from "@/lib/packages";
 import type { Client, ViewerInfo } from "@/lib/types";
 
 const TITLES: Record<Route["page"], { title: string; subtitle: string }> = {
   dashboard: { title: "Dashboard", subtitle: "Speech usage, customers and GPU health at a glance" },
-  companies: { title: "Companies", subtitle: "Every licensed company, its package and this month's usage" },
+  companies: { title: "Companies", subtitle: "Every company, its package, lines and this month's calls and minutes" },
   company: { title: "Company", subtitle: "" },
   new: { title: "New licence", subtitle: "Create an API key for a company" },
-  packages: { title: "Packages", subtitle: "Monthly minutes and lines per subscription package" },
+  packages: { title: "Packages", subtitle: "Calls, minutes and calls at once in each subscription package" },
   gpus: { title: "GPU performance", subtitle: "Health, traffic, latency and resources of every GPU" },
   fleet: { title: "GPU fleet", subtitle: "Add, deploy, drain and remove GPU servers" },
-  manage: { title: "Licence settings", subtitle: "Package, voice pipeline, talk time, sign-in and key, one company at a time" },
+  settings: { title: "Company settings", subtitle: "Package, voice pipeline, voice and daily talk time, one company at a time" },
+  licences: { title: "Licences & sign-in", subtitle: "Each company's licence key, status and IVR Console sign-in" },
   // Company-account pages (titled in the shell).
   limits: { title: "Talk-time limit", subtitle: "" },
+  voice: { title: "Voice", subtitle: "" },
   account: { title: "Account", subtitle: "" },
 };
 
 /** Pages a company account may open; anything else shows its dashboard. */
-const COMPANY_PAGES: Route["page"][] = ["dashboard", "limits", "account"];
+const COMPANY_PAGES: Route["page"][] = ["dashboard", "limits", "voice", "account"];
 
 export default function App() {
   const router = useRouter();
@@ -202,11 +205,13 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
   const heading = isCompany
     ? page.page === "limits"
       ? { title: "Talk-time limit", subtitle: "How long each caller may talk per day" }
+      : page.page === "voice"
+        ? { title: "Voice", subtitle: "The voice your callers hear" }
       : page.page === "account"
         ? { title: "Account", subtitle: "Your licence and sign-in" }
         : { title: "Dashboard", subtitle: `${viewer.companyName}: calls, minutes and usage` }
     : page.page === "company"
-      ? { title: company?.company_name ?? "Company", subtitle: company ? `${company.package_name || "Essential"} package` : "" }
+      ? { title: company?.company_name ?? "Company", subtitle: company ? `${company.package_name || DEFAULT_PACKAGE} package` : "" }
       : TITLES[page.page];
 
   // The browser tab names the page: "Companies · Chakra Console".
@@ -256,7 +261,7 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
           <div className="flex-1 px-4 md:px-8 py-6">
             {/* Keyed per page, so each page fades in when opened. */}
             <div
-              key={page.page === "company" ? `company-${page.id}` : page.page}
+              key={page.page === "company" ? `company-${page.id}` : page.page === "licences" ? `licences-${page.id ?? "all"}` : page.page}
               className="max-w-[1440px] mx-auto page-in"
               style={{ viewTransitionName: "page" }}
             >
@@ -264,6 +269,7 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
                 <>
                   {page.page === "dashboard" && <CompanyDetail id={viewer.licenseId} companyView />}
                   {page.page === "limits" && <TalkTimePage />}
+                  {page.page === "voice" && <VoicePage />}
                   {page.page === "account" && <AccountPage />}
                 </>
               ) : (
@@ -271,7 +277,8 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
                   {page.page === "dashboard" && <DashboardPage />}
                   {page.page === "companies" && <CompaniesPage />}
                   {page.page === "company" && <CompanyDetail id={page.id} />}
-                  {page.page === "manage" && <LicenceSettingsPage id={page.id} />}
+                  {page.page === "settings" && <CompanySettingsPage id={page.id} />}
+                  {page.page === "licences" && <LicencesPage id={page.id} />}
                   {page.page === "new" && <NewLicensePage />}
                   {page.page === "packages" && <PackagesPage />}
                   {page.page === "gpus" && <GpuPage node={page.node} />}
@@ -302,6 +309,7 @@ function Sidebar({ route, viewer, open, onClose }: { route: Route; viewer: Viewe
       label: "Settings",
       items: [
         { page: "limits", label: "Talk-time limit", icon: <Clock size={16} /> },
+        { page: "voice", label: "Voice", icon: <Mic size={16} /> },
         { page: "account", label: "Account", icon: <Lock size={16} /> },
       ],
     },
@@ -312,7 +320,8 @@ function Sidebar({ route, viewer, open, onClose }: { route: Route; viewer: Viewe
       label: "Customers",
       items: [
         { page: "companies", label: "Companies", icon: <Building size={16} /> },
-        { page: "manage", label: "Licence settings", icon: <Settings size={16} /> },
+        { page: "settings", label: "Company settings", icon: <Settings size={16} /> },
+        { page: "licences", label: "Licences & sign-in", icon: <Key size={16} /> },
         { page: "packages", label: "Packages", icon: <Box size={16} /> },
       ],
     },

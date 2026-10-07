@@ -34,10 +34,37 @@ export interface Client {
   limit_warning_seconds?: number | null;
   /** Agents with their own daily limit (agent name → minutes; 0 = none). */
   agent_daily_limits?: Record<string, number> | null;
+  /** The preset voice of its Gemini Live lines; null = the app's own setting. */
+  gemini_voice?: string | null;
+  /** The kinds of voice its lines use: "preset" (a named voice) and/or "clone"
+   * (its own reference recording). What a company account sees instead of pipelines. */
+  voice_modes?: ("preset" | "clone")[];
+  /** A reference recording is uploaded for its Chakra Voice lines. */
+  has_custom_voice?: boolean;
+  /** Finished calls since the 1st of this month, on every pipeline. */
+  month_calls?: number;
   created_at?: string | null;
   /** Speech minutes (STT + TTS audio) since the 1st of this month. */
   month_minutes: number;
   last_activity?: string | null;
+}
+
+/** A licence's voice settings (GET /api/voice). */
+export interface VoiceState {
+  modes: ("preset" | "clone")[];
+  /** The chosen preset voice; "" = the app's own setting. */
+  preset: string;
+  custom: {
+    voice_id: string;
+    file_name: string | null;
+    seconds: number;
+    transcript: string;
+    /** pending: not used on a call yet; ready: a GPU has prepared it; rejected: unusable. */
+    status: "pending" | "ready" | "rejected";
+    status_detail: string;
+    updated_by: string | null;
+    updated_at: string;
+  } | null;
 }
 
 export interface DailyPoint {

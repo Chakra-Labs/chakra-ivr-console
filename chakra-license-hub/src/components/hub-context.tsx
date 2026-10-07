@@ -16,8 +16,10 @@ export type Route =
   | { page: "packages" }
   | { page: "gpus"; node?: number }
   | { page: "fleet" }
-  | { page: "manage"; id?: number }
+  | { page: "settings"; id?: number }
+  | { page: "licences"; id?: number }
   | { page: "limits" }
+  | { page: "voice" }
   | { page: "account" };
 
 export function parseRoute(hash: string): Route {
@@ -26,16 +28,20 @@ export function parseRoute(hash: string): Route {
   if (company) return { page: "company", id: Number(company[1]) };
   const gpu = /^gpus\/(\d+)$/.exec(h);
   if (gpu) return { page: "gpus", node: Number(gpu[1]) };
-  const manage = /^manage\/(\d+)$/.exec(h);
-  if (manage) return { page: "manage", id: Number(manage[1]) };
-  if (["companies", "new", "packages", "gpus", "fleet", "manage", "limits", "account"].includes(h)) return { page: h } as Route;
+  // "manage" is what Company settings was called: old links still open it.
+  const settings = /^(?:settings|manage)\/(\d+)$/.exec(h);
+  if (settings) return { page: "settings", id: Number(settings[1]) };
+  const licence = /^licences\/(\d+)$/.exec(h);
+  if (licence) return { page: "licences", id: Number(licence[1]) };
+  if (h === "manage") return { page: "settings" };
+  if (["companies", "new", "packages", "gpus", "fleet", "settings", "licences", "limits", "voice", "account"].includes(h)) return { page: h } as Route;
   return { page: "dashboard" };
 }
 
 export function routeHash(r: Route): string {
   if (r.page === "company") return `#company/${r.id}`;
   if (r.page === "gpus" && r.node != null) return `#gpus/${r.node}`;
-  if (r.page === "manage" && r.id != null) return `#manage/${r.id}`;
+  if ((r.page === "settings" || r.page === "licences") && r.id != null) return `#${r.page}/${r.id}`;
   return `#${r.page}`;
 }
 
