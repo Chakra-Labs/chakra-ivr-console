@@ -109,15 +109,6 @@ export function VoiceEditor({ client, technical, wide = false }: { client: Clien
           <CloneEditor client={client} state={state} busy={busy} save={save} sideBySide={wide && !both} />
         </section>
       )}
-      {shown.includes("clone") && (
-        <section className={wide && both ? "xl:col-span-2" : undefined}>
-          <SectionTitle
-            title={technical ? "Chakra Voice lines: greeting" : "Greeting"}
-            hint="How a call is opened. A recorded opening plays the instant the call connects; a generated one takes a few seconds."
-          />
-          <GreetingEditor client={client} />
-        </section>
-      )}
       {shown.includes("preset") && (
         <section>
           <SectionTitle
@@ -383,7 +374,8 @@ const GREETING_MODES = [
   { id: "auto", label: "Generated each call", detail: "The agent composes the whole greeting. Callers wait a few seconds before they hear it." },
 ] as const;
 
-function GreetingEditor({ client }: { client: Client }) {
+/** How calls are opened on Chakra Voice lines: a card of its own (admins and the company). */
+export function GreetingEditor({ client }: { client: Client }) {
   const { toast, confirm, now } = useHub();
   const input = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<GreetingState | null>(null);

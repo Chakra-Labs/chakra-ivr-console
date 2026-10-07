@@ -23,7 +23,7 @@ import { track } from "@/lib/loading";
 import { DEFAULT_PACKAGE, findPackage } from "@/lib/packages";
 import { PIPELINES, isPipeline, pipelineLabel } from "@/lib/pipelines";
 import { licenceChangeTiming } from "@/lib/voice-rules";
-import { VoiceEditor } from "./voice-settings";
+import { GreetingEditor, VoiceEditor } from "./voice-settings";
 import type { Client, ConsoleAccount } from "@/lib/types";
 
 // ── shared pieces ────────────────────────────────────────────────────────────
@@ -315,6 +315,14 @@ export default function CompanySettingsPage({ id }: { id?: number }) {
         </div>
         <div className="xl:col-span-12">
           <VoiceCard client={client} />
+        </div>
+        <div className="xl:col-span-12">
+          <Card
+            title="Greeting"
+            subtitle="Chakra Voice lines: how a call is opened. A recorded opening plays the instant the call connects; a generated one takes a few seconds. The company can also change this from its own account."
+          >
+            <GreetingEditor client={client} />
+          </Card>
         </div>
       </div>
     </div>
@@ -712,9 +720,16 @@ export function VoicePage() {
   if (!client) return <Empty>Your licence could not be loaded.</Empty>;
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-      <Card className="xl:col-span-8" title="Agent voice" subtitle="The voice your callers hear">
-        <VoiceEditor key={client.id} client={client} technical={false} />
-      </Card>
+      <div className="xl:col-span-8 space-y-4">
+        <Card title="Agent voice" subtitle="The voice your callers hear">
+          <VoiceEditor key={client.id} client={client} technical={false} />
+        </Card>
+        {client.voice_modes?.includes("clone") && (
+          <Card title="Greeting" subtitle="How a call is opened: a recorded opening plays the instant the call connects; a generated one takes a few seconds">
+            <GreetingEditor key={client.id} client={client} />
+          </Card>
+        )}
+      </div>
       <Card className="xl:col-span-4" title="Good to know">
         <ul className="space-y-3 text-[13px] text-ink-2">
           {[
