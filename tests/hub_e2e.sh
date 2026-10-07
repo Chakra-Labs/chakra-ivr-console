@@ -10,8 +10,9 @@ cd "$(dirname "$0")/../chakra-license-hub"
 corepack enable >/dev/null 2>&1; corepack prepare pnpm@10 --activate >/dev/null 2>&1
 pnpm install --frozen-lockfile >/dev/null 2>&1 || pnpm install >/dev/null 2>&1
 pnpm lint || { echo "LINT FAILED"; exit 1; }
-pnpm exec tsc --noEmit || { echo "TYPE CHECK FAILED"; exit 1; }
+# The build type-checks, and writes the route types tsc needs (.next/types).
 pnpm build >/tmp/build.log 2>&1 || { echo "BUILD FAILED"; tail -40 /tmp/build.log; exit 1; }
+pnpm exec tsc --noEmit || { echo "TYPE CHECK FAILED"; exit 1; }
 echo "build ok"
 
 ADMIN_HASH=$(node -e '
