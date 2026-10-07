@@ -8,12 +8,11 @@ import { useFleet } from "./fleet-context";
 import { useAnalytics, useHub } from "./hub-context";
 import { AlertTriangle, ArrowLeft, Building, Calendar, Clock, Gauge, Settings, Zap } from "./icons";
 import { CompanyCostCard } from "./cost-cards";
-import { usesChakraVoice } from "@/lib/pipelines";
 import { Badge, Button, Card, ChartSkeleton, Empty, ErrorBanner, KeyValue, LinesSkeleton, Meter, MiniStat, Segmented, Skeleton, Stat, cx } from "./ui";
 import { ago, compact, dateOnly, dateTime, dayLabel, minutes, num, pct, signedPct } from "@/lib/format";
 import { DEFAULT_PACKAGE, INFLIGHT_PER_LINE, gpusFor, packageLines, packageQuota } from "@/lib/packages";
 import { describeLimit } from "@/lib/daily-limit";
-import { pipelineLabel } from "@/lib/pipelines";
+import { pipelineLabel, usesChakraVoice } from "@/lib/pipelines";
 import type { Client, LicenseUsage } from "@/lib/types";
 
 const EMPTY_USAGE: LicenseUsage = {
