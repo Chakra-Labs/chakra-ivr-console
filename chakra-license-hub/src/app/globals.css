@@ -63,6 +63,33 @@ body {
   color: var(--ink);
 }
 
+/* Anything that can be clicked shows the hand. Tailwind's reset leaves buttons
+   with the arrow, so a card or row built as a button did not look clickable.
+   In the base layer, so a cursor-* class on an element still wins. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"],
+  [role="switch"],
+  [role="option"],
+  [role="menuitem"],
+  a[href],
+  summary,
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  input[type="file"]:not(:disabled),
+  input[type="range"]:not(:disabled),
+  label:has(input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled), input[type="file"]:not(:disabled)) {
+    cursor: pointer;
+  }
+  button:disabled,
+  select:disabled,
+  input:disabled {
+    cursor: not-allowed;
+  }
+}
+
 /* Everything 10% larger on desktop screens; phones keep their own size.
    `zoom` also scales vh units, so full-height pieces divide by --zoom
    (.h-viewport / .min-h-viewport) to still fit the window exactly. */
