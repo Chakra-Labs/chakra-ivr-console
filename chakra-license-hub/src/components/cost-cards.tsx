@@ -115,7 +115,7 @@ export function CostTable({
         {HOW}
         {cost.llm_usd > 0 && ` ${pct(cost.llm_reported_usd / cost.llm_usd)} of this month's figure is the provider's own.`}
         {cost.unpriced_requests > 0 && ` ${num(cost.unpriced_requests)} request${cost.unpriced_requests === 1 ? " was" : "s were"} made before cost was recorded, or on a model with no price set, and count as zero.`}
-        {" "}Only companies on Chakra Voice are listed; Gemini Live runs on the company's own Google key.
+        {" "}Only companies on Chakra Voice are listed; Gemini Live runs on the company&apos;s own Google key.
       </p>
     </Card>
   );
