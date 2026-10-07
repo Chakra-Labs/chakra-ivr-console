@@ -119,6 +119,8 @@ function LicenceGrid() {
               <article
                 key={c.id}
                 className="group bg-panel border border-line rounded-2xl p-5 flex flex-col gap-4 hover:border-line-strong hover:-translate-y-0.5 transition-[border-color,transform] duration-200 cursor-pointer"
+                // Shared with the licence page's header card: the browser morphs one into the other.
+                style={{ viewTransitionName: `licence-${c.id}` }}
                 onClick={() => navigate({ page: "licences", id: c.id })}
               >
                 <div className="flex items-start gap-3">
@@ -194,8 +196,10 @@ function LicenceDetail({ client }: { client: Client }) {
     <div className="space-y-5">
       <Back onClick={() => navigate({ page: "licences" })} />
 
-      {/* The company and its licence details in one card. */}
-      <section className="bg-panel border border-line rounded-2xl p-5">
+      {/* The company and its licence details in one card. Shares its
+          view-transition-name with this licence's card in the grid, so opening
+          a card grows it into this header. */}
+      <section className="bg-panel border border-line rounded-2xl p-5" style={{ viewTransitionName: `licence-${client.id}` }}>
         <div className="flex flex-wrap items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-panel-3 border border-line flex items-center justify-center text-accent shrink-0">
             <Key size={20} />
