@@ -22,6 +22,7 @@ import { ago, compact, dateOnly, dateTime } from "@/lib/format";
 import { track } from "@/lib/loading";
 import { DEFAULT_PACKAGE, findPackage } from "@/lib/packages";
 import { PIPELINES, isPipeline, pipelineLabel } from "@/lib/pipelines";
+import { licenceChangeTiming } from "@/lib/voice-rules";
 import { VoiceEditor } from "./voice-settings";
 import type { Client, ConsoleAccount } from "@/lib/types";
 
@@ -539,7 +540,7 @@ function TalkTimeCard({ client }: { client: Client }) {
 }
 
 export function StatusKeyCard({ client }: { client: Client }) {
-  const { rotateKey } = useHub();
+  const { rotateKey, confirm } = useHub();
   const { busy, setBusy, update } = useLicenceUpdate(client);
   return (
     <Card title="Licence status & key">
@@ -553,7 +554,25 @@ export function StatusKeyCard({ client }: { client: Client }) {
             on={client.is_active}
             label="Licence active"
             disabled={busy !== null}
-            onChange={(v) => update({ action: "toggle_status", isActive: v }, v ? "Activation" : "Suspension")}
+            onChange={async (v) => {
+              const yes = await confirm(
+                v
+                  ? {
+                      title: `Activate ${client.company_name}'s licence?`,
+                      body: "The key works again and the company's phone lines take calls.",
+                      takes: licenceChangeTiming(client.voice_modes, false),
+                      confirmLabel: "Activate licence",
+                    }
+                  : {
+                      title: `Suspend ${client.company_name}'s licence?`,
+                      body: "The key is refused and the company's phone lines stop taking calls until you activate it again. Nothing is deleted.",
+                      takes: licenceChangeTiming(client.voice_modes, true),
+                      confirmLabel: "Suspend licence",
+                      danger: true,
+                    },
+              );
+              if (yes) update({ action: "toggle_status", isActive: v }, v ? "Activation" : "Suspension");
+            }}
           />
         </div>
         <div className="p-3 rounded-xl bg-panel-2 border border-line">
@@ -589,7 +608,7 @@ export function DangerCard({ client }: { client: Client }) {
     const yes = await confirm({
       title: `Delete ${client.company_name}'s licence?`,
       body: "The company's phone lines stop taking calls and its IVR Console sign-in is removed. Usage history is kept. This cannot be undone.",
-      takes: "The key stops working within about a minute.",
+      takes: licenceChangeTiming(client.voice_modes, true),
       confirmLabel: "Delete licence",
       danger: true,
     });

@@ -25,6 +25,7 @@ import PackagesPage from "@/components/packages-page";
 import { Button, ConfirmDialog, Spinner, cx, type ConfirmOptions } from "@/components/ui";
 import { DEFAULT_PACKAGE, DEFAULT_PACKAGES, type Package } from "@/lib/packages";
 import type { Client, ViewerInfo } from "@/lib/types";
+import { licenceChangeTiming } from "@/lib/voice-rules";
 
 const TITLES: Record<Route["page"], { title: string; subtitle: string }> = {
   dashboard: { title: "Dashboard", subtitle: "Speech usage, customers and GPU health at a glance" },
@@ -190,7 +191,7 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
       const yes = await confirm({
         title: `Issue a new key for ${client.company_name}?`,
         body: "The company must put the new key in its app. The new key is shown once, right after this.",
-        takes: "The current key stops working within about a minute.",
+        takes: `The current key stops working. ${licenceChangeTiming(client.voice_modes, true)}`,
         confirmLabel: "Rotate key",
         danger: true,
       });

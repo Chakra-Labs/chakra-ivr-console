@@ -78,13 +78,18 @@ function useVoice(client: Client) {
 export function VoiceEditor({ client, technical, wide = false }: { client: Client; technical: boolean; wide?: boolean }) {
   const { state, busy, save } = useVoice(client);
   if (!state) return <LinesSkeleton rows={5} />;
-  const both = state.modes.length > 1;
+  // An admin can prepare either voice ahead of a pipeline change; each says
+  // whether a line uses it now. A company sees only the kinds its lines use.
+  const shown = technical ? (["clone", "preset"] as const) : state.modes;
+  const both = shown.length > 1;
+  const inUse = (mode: "clone" | "preset") => (technical ? state.modes.includes(mode) : undefined);
 
   return (
     <div className={wide && both ? "grid grid-cols-1 xl:grid-cols-2 gap-x-8 gap-y-6 items-start" : "space-y-6"}>
-      {state.modes.includes("clone") && (
+      {shown.includes("clone") && (
         <section>
           <SectionTitle
+            inUse={inUse("clone")}
             title={technical ? "Chakra Voice lines: reference voice" : both ? "Custom voice" : "Your custom voice"}
             hint={
               technical
@@ -95,9 +100,10 @@ export function VoiceEditor({ client, technical, wide = false }: { client: Clien
           <CloneEditor client={client} state={state} busy={busy} save={save} sideBySide={wide && !both} />
         </section>
       )}
-      {state.modes.includes("preset") && (
+      {shown.includes("preset") && (
         <section>
           <SectionTitle
+            inUse={inUse("preset")}
             title={technical ? "Gemini Live lines: preset voice" : both ? "Preset voice" : "Your agent's voice"}
             hint={
               technical
@@ -114,11 +120,18 @@ export function VoiceEditor({ client, technical, wide = false }: { client: Clien
   );
 }
 
-function SectionTitle({ title, hint }: { title: string; hint: string }) {
+/** `inUse`: whether a line runs this kind of voice now (admins only). */
+function SectionTitle({ title, hint, inUse }: { title: string; hint: string; inUse?: boolean }) {
   return (
     <div className="mb-3">
-      <h4 className="text-[13px] font-semibold text-ink">{title}</h4>
-      <p className="text-[12px] text-ink-3 mt-0.5">{hint}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="text-[13px] font-semibold text-ink">{title}</h4>
+        {inUse !== undefined && <Badge tone={inUse ? "good" : "neutral"}>{inUse ? "Used by lines now" : "No line uses this now"}</Badge>}
+      </div>
+      <p className="text-[12px] text-ink-3 mt-0.5">
+        {hint}
+        {inUse === false && " You can set it now: it applies as soon as a line is moved to this voice AI."}
+      </p>
     </div>
   );
 }

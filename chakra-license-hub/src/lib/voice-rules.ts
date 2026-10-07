@@ -93,3 +93,21 @@ export function clipProblem(bytes: Uint8Array): string | null {
   }
   return null;
 }
+
+/** How soon a suspended, deleted or replaced key stops calls (`stops`), or an
+ * activated one serves them again, by the kinds of line the licence has: Chakra
+ * Voice speech goes through the gateway, which re-checks a key about once a
+ * minute; a Gemini Live line only learns at the app's 10-minute licence re-check. */
+export function licenceChangeTiming(modes: VoiceMode[] | undefined, stops: boolean): string {
+  const chakra = !modes || modes.includes("clone");
+  const gemini = !modes || modes.includes("preset");
+  const both = chakra && gemini;
+  if (stops) {
+    const fast = `${both ? "Chakra Voice lines: calls" : "Calls"} stop within about a minute, including calls in progress.`;
+    const slow = `${both ? "Gemini Live lines: new calls" : "New calls"} stop within 10 minutes; calls in progress carry on until they end.`;
+    return [chakra && fast, gemini && slow].filter(Boolean).join(" ");
+  }
+  const fast = `${both ? "Chakra Voice lines take" : "Lines take"} calls again within about a minute.`;
+  const slow = `${both ? "Gemini Live lines take" : "Lines take"} calls again within 10 minutes.`;
+  return `${[chakra && fast, gemini && slow].filter(Boolean).join(" ")} An app that was restarted while suspended must be started again.`;
+}
