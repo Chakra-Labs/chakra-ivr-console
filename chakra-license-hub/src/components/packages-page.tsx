@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useHub } from "./hub-context";
 import { Box, Edit2, Plus, Trash2, X } from "./icons";
 import { Button, Empty, inputClass } from "./ui";
-import { num } from "@/lib/format";
+import { compact, num } from "@/lib/format";
 import { gpusFor, type Package } from "@/lib/packages";
 
 // Package edits here last until the page reloads: the list is defined in
@@ -72,8 +72,9 @@ export default function PackagesPage() {
                 </div>
                 <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
                   {[
-                    { label: "Calls", value: p.calls ? num(p.calls) : "–" },
-                    { label: "Minutes", value: num(p.maxMinutes) },
+                    // Millions are shortened ("10M") so they fit the tile.
+                    { label: "Calls", value: p.calls ? (p.calls >= 1e6 ? compact(p.calls) : num(p.calls)) : "–" },
+                    { label: "Minutes", value: p.maxMinutes >= 1e6 ? compact(p.maxMinutes) : num(p.maxMinutes) },
                     { label: "At once", value: num(p.lines) },
                   ].map((f) => (
                     <div key={f.label} className="rounded-xl bg-panel-2 border border-line px-2 py-2.5 min-w-0">

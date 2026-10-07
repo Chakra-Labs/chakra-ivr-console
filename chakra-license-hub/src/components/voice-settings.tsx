@@ -107,7 +107,7 @@ export function VoiceEditor({ client, technical, wide = false }: { client: Clien
                   : "Choose the voice your callers hear."
             }
           />
-          <PresetEditor state={state} busy={busy} roomy={wide && !both} onSave={(preset) => save("Voice", () => voiceApi("PUT", client.id, { preset }))} />
+          <PresetEditor state={state} busy={busy} columns={wide ? (both ? 3 : 6) : 4} onSave={(preset) => save("Voice", () => voiceApi("PUT", client.id, { preset }))} />
         </section>
       )}
     </div>
@@ -123,12 +123,12 @@ function SectionTitle({ title, hint }: { title: string; hint: string }) {
   );
 }
 
-function PresetEditor({ state, busy, roomy, onSave }: { state: VoiceState; busy: string | null; roomy?: boolean; onSave: (preset: string) => void }) {
+function PresetEditor({ state, busy, columns, onSave }: { state: VoiceState; busy: string | null; columns: 3 | 4 | 6; onSave: (preset: string) => void }) {
   const [picked, setPicked] = useState(state.preset);
   const options = [{ id: "", gender: "", style: "Set in the app" }, ...PRESET_VOICES];
   return (
     <div>
-      <div className={cx("grid grid-cols-2 sm:grid-cols-3 gap-2", roomy ? "lg:grid-cols-4 xl:grid-cols-6" : "lg:grid-cols-4")} role="radiogroup" aria-label="Preset voice">
+      <div className={cx("grid grid-cols-2 sm:grid-cols-3 gap-2", columns === 6 ? "lg:grid-cols-4 xl:grid-cols-6" : columns === 4 && "lg:grid-cols-4")} role="radiogroup" aria-label="Preset voice">
         {options.map((v) => {
           const on = picked === v.id;
           return (
