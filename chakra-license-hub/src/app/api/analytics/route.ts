@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 
 import { currentViewer, unauthorized } from "@/lib/auth";
 import { hasCallUsage, OFF_GATEWAY, pool, TIME_ZONE, usageSchema } from "@/lib/db";
-import type { Analytics, DailyPoint, HeatCell, LicenseUsage } from "@/lib/types";
+import type { Analytics, CostSummary, DailyPoint, HeatCell, LicenseUsage } from "@/lib/types";
 
 // Speech usage for the dashboard and the company page, from `speech_usage`
 // (one row per licence per hour, written by the speech gateway).
@@ -275,11 +275,111 @@ export async function GET(request: NextRequest) {
     };
     // A company account gets totals only: which speech engines and models serve
     // its calls (STT/TTS/Gemini Live, speech requests, GPU load) is Chakra Labs'.
-    return Response.json(viewer.role === "company" ? forCompany(result) : result);
+    if (viewer.role === "company") return Response.json(forCompany(result));
+    result.cost = await costs(cal.month_start, result.licenses, license);
+    return Response.json(result);
   } catch (error) {
     console.error("Database error (analytics):", error);
     return Response.json({ error: "Failed to load analytics" }, { status: 500 });
   }
+}
+
+/** What serving each licence has cost this month, added to `licenses` in place;
+ * the fleet's totals are returned. Null until the gateway that records cost is
+ * running (the columns are its to add).
+ *
+ * LLM: `llm_usage.cost_usd`, priced by the gateway as each request is made.
+ * GPU: each hour's rent (`fleet_nodes.hourly_usd`, at today's rates) for a
+ * role, split between licences by their share of that hour's speech seconds;
+ * an hour nobody used is nobody's, and shows as idle. */
+async function costs(monthStart: Date, licenses: LicenseUsage[], only: number | null): Promise<CostSummary | null> {
+  try {
+    const [rate, per] = await Promise.all([
+      pool!.query(
+        `SELECT COALESCE(SUM(hourly_usd), 0)::float8 AS hourly,
+                GREATEST(EXTRACT(EPOCH FROM now() - $1::timestamptz), 0)::float8 / 3600 AS hours
+         FROM fleet_nodes WHERE state IN ('active', 'draining')`,
+        [monthStart],
+      ),
+      pool!.query(
+        `WITH rate AS (
+           SELECT COALESCE(SUM(hourly_usd) FILTER (WHERE role = 'stt'), 0)::float8 AS stt,
+                  COALESCE(SUM(hourly_usd) FILTER (WHERE role = 'tts'), 0)::float8 AS tts
+           FROM fleet_nodes WHERE state IN ('active', 'draining')
+         ), tot AS (
+           SELECT hour, SUM(stt_seconds) AS s, SUM(tts_seconds) AS t
+           FROM speech_usage WHERE hour >= $1 GROUP BY hour
+         ), gpu AS (
+           SELECT u.license_id,
+                  SUM(CASE WHEN tot.s > 0 THEN u.stt_seconds / tot.s * rate.stt ELSE 0 END
+                    + CASE WHEN tot.t > 0 THEN u.tts_seconds / tot.t * rate.tts ELSE 0 END)::float8 AS usd
+           FROM speech_usage u JOIN tot USING (hour), rate
+           WHERE u.hour >= $1 GROUP BY u.license_id
+         ), llm AS (
+           SELECT license_id, SUM(cost_usd)::float8 AS usd, SUM(reported_usd)::float8 AS reported
+           FROM llm_usage WHERE hour >= $1 GROUP BY license_id
+         )
+         SELECT COALESCE(gpu.license_id, llm.license_id) AS license_id,
+                COALESCE(gpu.usd, 0) AS gpu_usd, COALESCE(llm.usd, 0) AS llm_usd, COALESCE(llm.reported, 0) AS llm_reported
+         FROM gpu FULL JOIN llm USING (license_id)`,
+        [monthStart],
+      ),
+    ]);
+    const hourly = f(rate.rows[0]?.hourly);
+    const rent = hourly * f(rate.rows[0]?.hours);
+    let llm = 0;
+    let reported = 0;
+    let used = 0;
+    for (const r of per.rows) {
+      const id = Number(r.license_id);
+      llm += f(r.llm_usd);
+      reported += f(r.llm_reported);
+      used += f(r.gpu_usd);
+      if (only != null && id !== only) continue;
+      let row = licenses.find((l) => l.license_id === id);
+      if (!row) {
+        row = { ...EMPTY_USAGE, license_id: id };
+        licenses.push(row);
+      }
+      row.month_llm_usd = f(r.llm_usd);
+      row.month_gpu_usd = f(r.gpu_usd);
+    }
+    return {
+      llm_usd: llm,
+      llm_reported_usd: reported,
+      gpu_rent_usd: rent,
+      gpu_idle_usd: Math.max(0, rent - used),
+      gpu_hourly_usd: hourly,
+      balance: await hyperstackCredit(),
+    };
+  } catch (error) {
+    console.warn("analytics: cost is not available yet:", (error as Error).message);
+    return null;
+  }
+}
+
+// Hyperstack is the one provider here with an API for its remaining credit
+// (Google's Gemini API has none). Read with HYPERSTACK_API_KEY when it is set,
+// at most every five minutes.
+let credit: { at: number; value: CostSummary["balance"] } | null = null;
+async function hyperstackCredit(): Promise<CostSummary["balance"]> {
+  const key = process.env.HYPERSTACK_API_KEY;
+  if (!key) return null;
+  if (credit && Date.now() - credit.at < 300_000) return credit.value;
+  let value: CostSummary["balance"] = null;
+  try {
+    const r = await fetch("https://infrahub-api.nexgencloud.com/v1/billing/user-credit/credit", {
+      headers: { api_key: key, accept: "application/json" },
+      signal: AbortSignal.timeout(4000),
+      cache: "no-store",
+    });
+    const usd = r.ok ? Number((await r.json())?.data?.credit) : NaN;
+    if (Number.isFinite(usd)) value = { provider: "Hyperstack", usd };
+  } catch {
+    // Shown as absent; the page does not depend on it.
+  }
+  credit = { at: Date.now(), value };
+  return value;
 }
 
 /** The analytics a company account may see: minutes and calls, nothing that
@@ -293,8 +393,10 @@ function forCompany(a: Analytics): Analytics {
       stt_min: 0, tts_min: 0, live_min: 0, stt_requests: 0, tts_requests: 0, errors: 0, rejected: 0,
     })),
     heatmap: a.heatmap.map((h) => ({ ...h, requests: 0 })),
+    cost: null,
     licenses: a.licenses.map((l) => ({
       ...l,
+      month_llm_usd: undefined, month_gpu_usd: undefined,
       month_stt_min: 0, month_tts_min: 0, month_live_min: 0,
       month_requests: 0, month_errors: 0, month_rejected: 0, month_peak_inflight: 0,
       last_mtd_requests: 0, last_mtd_errors: 0, last_month_requests: 0,

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { BarList, ColumnChart, Heatmap } from "./charts";
+import { CostTable } from "./cost-cards";
 import { useFleet } from "./fleet-context";
 import { useAnalytics, useHub } from "./hub-context";
 import { AlertOctagon, AlertTriangle, Building, CheckCircle, ChevronRight, Clock, Server, Zap } from "./icons";
@@ -221,6 +222,13 @@ export default function DashboardPage() {
           )}
         </Card>
       </div>
+
+      <CostTable
+        clients={clients}
+        licenses={data?.licenses ?? []}
+        cost={data?.cost}
+        onOpen={(id) => navigate({ page: "company", id })}
+      />
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         <Card className="xl:col-span-7" title="Requests & errors" subtitle={`STT and TTS requests per day, last ${days} days`}>
