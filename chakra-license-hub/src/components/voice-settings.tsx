@@ -124,7 +124,7 @@ function SectionTitle({ title, hint }: { title: string; hint: string }) {
 
 function PresetEditor({ state, busy, onSave }: { state: VoiceState; busy: string | null; onSave: (preset: string) => void }) {
   const [picked, setPicked] = useState(state.preset);
-  const options = [{ id: "", gender: "", style: "The voice set in the app" }, ...PRESET_VOICES];
+  const options = [{ id: "", gender: "", style: "Set in the app" }, ...PRESET_VOICES];
   return (
     <div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2" role="radiogroup" aria-label="Preset voice">

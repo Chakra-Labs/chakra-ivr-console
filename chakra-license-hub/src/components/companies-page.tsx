@@ -10,11 +10,11 @@ import { DEFAULT_PACKAGE, findPackage, packageLines, packageQuota } from "@/lib/
 import { pipelineLabel } from "@/lib/pipelines";
 import type { Client } from "@/lib/types";
 
-/** "Chakra Voice", or "Chakra Voice +1 line" when a line runs another pipeline. */
+/** "Chakra Voice", or "Chakra Voice +1" when one line runs another pipeline. */
 function voiceAi(c: Client): string {
   const main = c.pipelines?.[0];
   const others = Object.values(c.agent_pipelines ?? {}).filter((p) => p !== main).length;
-  return `${pipelineLabel(main)}${others ? ` +${others} line${others === 1 ? "" : "s"}` : ""}`;
+  return `${pipelineLabel(main)}${others ? ` +${others}` : ""}`;
 }
 
 /** The voice callers hear, in a few words. */
