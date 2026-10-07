@@ -22,8 +22,9 @@ export function CompanyCostCard({ usage, cost }: { usage: LicenseUsage; cost: Co
   const share = cachedShare(usage);
   return (
     <Card title="LLM cost" subtitle="What this company's calls have cost in LLM usage this month (USD)">
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
         <MiniStat label="Cost" value={money(total, 2)} />
+        <MiniStat label="Model" value={usage.month_llm_model || "–"} />
         <MiniStat label="Per call" value={usage.month_calls ? money(total / usage.month_calls, 4) : "–"} />
         <MiniStat label="Per call minute" value={usage.month_call_min ? money(total / usage.month_call_min, 4) : "–"} />
         <MiniStat label="Requests" value={num(usage.month_llm_requests ?? 0)} />
@@ -71,6 +72,7 @@ export function CostTable({
             <thead>
               <tr className="text-left text-[11px] text-ink-3">
                 <th className="pb-2 font-medium">Company</th>
+                <th className="pb-2 font-medium">Model</th>
                 <th className="pb-2 font-medium text-right">Calls</th>
                 <th className="pb-2 font-medium text-right">Call minutes</th>
                 <th className="pb-2 font-medium text-right">Requests</th>
@@ -87,6 +89,7 @@ export function CostTable({
                 return (
                   <tr key={u.license_id} className="border-t border-line hover:bg-panel-2 cursor-pointer" onClick={() => onOpen(u.license_id)}>
                     <td className="py-2 text-ink truncate">{names.get(u.license_id) ?? `Licence #${u.license_id}`}</td>
+                    <td className="py-2 text-ink-2 truncate">{u.month_llm_model || "–"}</td>
                     <td className="py-2 text-right text-ink-2">{num(u.month_calls)}</td>
                     <td className="py-2 text-right text-ink-2">{minutes(u.month_call_min)}</td>
                     <td className="py-2 text-right text-ink-2">{num(u.month_llm_requests ?? 0)}</td>

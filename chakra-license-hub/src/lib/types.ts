@@ -135,6 +135,8 @@ export interface LicenseUsage {
   month_llm_in?: number;
   month_llm_cached?: number;
   month_llm_out?: number;
+  /** The model that served them (more than one, comma-separated, if it changed). */
+  month_llm_model?: string | null;
 }
 
 /** What the managed LLM has cost this month, USD (admins only). */

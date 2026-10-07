@@ -297,7 +297,8 @@ async function costs(monthStart: Date, licenses: LicenseUsage[], only: number | 
       `SELECT license_id, SUM(requests)::int AS requests,
               SUM(input_tokens)::float8 AS tokens_in, SUM(cached_tokens)::float8 AS cached, SUM(output_tokens)::float8 AS tokens_out,
               SUM(cost_usd)::float8 AS usd, SUM(reported_usd)::float8 AS reported,
-              COALESCE(SUM(requests) FILTER (WHERE cost_usd = 0 AND input_tokens > 0), 0)::int AS unpriced
+              COALESCE(SUM(requests) FILTER (WHERE cost_usd = 0 AND input_tokens > 0), 0)::int AS unpriced,
+              string_agg(DISTINCT model, ', ') AS models
        FROM llm_usage WHERE hour >= $1 GROUP BY license_id`,
       [monthStart],
     );
@@ -320,6 +321,7 @@ async function costs(monthStart: Date, licenses: LicenseUsage[], only: number | 
       row.month_llm_in = f(r.tokens_in);
       row.month_llm_cached = f(r.cached);
       row.month_llm_out = f(r.tokens_out);
+      row.month_llm_model = (r.models as string | null) ?? null;
     }
     return { llm_usd: llm, llm_reported_usd: reported, unpriced_requests: unpriced, balance: await hyperstackCredit() };
   } catch (error) {
@@ -366,7 +368,7 @@ function forCompany(a: Analytics): Analytics {
     cost: null,
     licenses: a.licenses.map((l) => ({
       ...l,
-      month_llm_usd: undefined, month_llm_requests: undefined, month_llm_in: undefined, month_llm_cached: undefined, month_llm_out: undefined,
+      month_llm_usd: undefined, month_llm_requests: undefined, month_llm_in: undefined, month_llm_cached: undefined, month_llm_out: undefined, month_llm_model: undefined,
       month_stt_min: 0, month_tts_min: 0, month_live_min: 0,
       month_requests: 0, month_errors: 0, month_rejected: 0, month_peak_inflight: 0,
       last_mtd_requests: 0, last_mtd_errors: 0, last_month_requests: 0,
