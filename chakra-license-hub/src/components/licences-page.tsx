@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { signedOut, useHub } from "./hub-context";
 import { ArrowLeft, ChevronRight, Key, Plus, RefreshCw, Search, Settings, UserCheck } from "./icons";
 import { ConsoleAccessCard, DangerCard, SettingsSkeleton, StatusKeyCard } from "./settings-pages";
-import { Badge, Button, Card, Empty, KeyValue, Segmented, Skeleton, Spinner, inputClass } from "./ui";
+import { Badge, Button, Empty, Segmented, Skeleton, Spinner, inputClass } from "./ui";
 import { ago, dateOnly } from "@/lib/format";
 import { DEFAULT_PACKAGE } from "@/lib/packages";
 import type { Client, ConsoleAccount } from "@/lib/types";
@@ -194,41 +194,49 @@ function LicenceDetail({ client }: { client: Client }) {
     <div className="space-y-5">
       <Back onClick={() => navigate({ page: "licences" })} />
 
-      <section className="bg-panel border border-line rounded-2xl p-5 flex flex-wrap items-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-panel-3 border border-line flex items-center justify-center text-accent shrink-0">
-          <Key size={20} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="text-[20px] font-semibold text-ink truncate">{client.company_name}</h2>
-          <div className="flex flex-wrap items-center gap-2 mt-1.5">
-            <Badge tone={client.is_active ? "good" : "critical"}>{client.is_active ? "Licence active" : "Licence suspended"}</Badge>
-            <span className="text-[12px] text-ink-3 font-mono">{client.token_prefix ?? "chk_live_"}…</span>
+      {/* The company and its licence details in one card. */}
+      <section className="bg-panel border border-line rounded-2xl p-5">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-panel-3 border border-line flex items-center justify-center text-accent shrink-0">
+            <Key size={20} />
           </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[20px] font-semibold text-ink truncate">{client.company_name}</h2>
+            <div className="flex flex-wrap items-center gap-2 mt-1.5">
+              <Badge tone={client.is_active ? "good" : "critical"}>{client.is_active ? "Licence active" : "Licence suspended"}</Badge>
+              <span className="text-[12px] text-ink-3 font-mono">{client.token_prefix ?? "chk_live_"}…</span>
+            </div>
+          </div>
+          <Button variant="ghost" onClick={() => navigate({ page: "company", id: client.id })}>
+            View dashboard
+          </Button>
+          <Button onClick={() => navigate({ page: "settings", id: client.id })}>
+            <Settings size={14} /> Company settings
+          </Button>
         </div>
-        <Button variant="ghost" onClick={() => navigate({ page: "company", id: client.id })}>
-          View dashboard
-        </Button>
-        <Button onClick={() => navigate({ page: "settings", id: client.id })}>
-          <Settings size={14} /> Company settings
-        </Button>
+        <dl className="mt-5 pt-4 border-t border-line grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3">
+          {[
+            { label: "Package", value: client.package_name || DEFAULT_PACKAGE },
+            { label: "Issued", value: dateOnly(client.created_at) },
+            { label: "Last call activity", value: ago(client.last_activity, now) },
+            { label: "Key goes in the app as", value: <span className="font-mono text-[12px]">CHAKRA_LICENSE_KEY</span> },
+          ].map((f) => (
+            <div key={f.label} className="min-w-0">
+              <dt className="text-[11px] text-ink-3">{f.label}</dt>
+              <dd className="text-[13px] text-ink mt-0.5 truncate">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
-      <div key={client.id} className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-        <div className="xl:col-span-7 space-y-4">
-          <ConsoleAccessCard client={client} />
-        </div>
-        <div className="xl:col-span-5 space-y-4">
+      {/* Two columns that end on the same line: the delete card sits at the bottom of the right one. */}
+      <div key={client.id} className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <ConsoleAccessCard client={client} />
+        <div className="flex flex-col gap-4">
           <StatusKeyCard client={client} />
-          <Card title="Licence details">
-            <KeyValue label="Company">{client.company_name}</KeyValue>
-            <KeyValue label="Package">{client.package_name || DEFAULT_PACKAGE}</KeyValue>
-            <KeyValue label="Issued">{dateOnly(client.created_at)}</KeyValue>
-            <KeyValue label="Last call activity">{ago(client.last_activity, now)}</KeyValue>
-            <p className="text-[11px] text-ink-3 mt-3">
-              The key goes in the company&apos;s app as CHAKRA_LICENSE_KEY. Package, voice and talk time are in Company settings.
-            </p>
-          </Card>
-          <DangerCard client={client} />
+          <div className="xl:mt-auto">
+            <DangerCard client={client} />
+          </div>
         </div>
       </div>
     </div>

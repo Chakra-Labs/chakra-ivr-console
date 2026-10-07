@@ -124,6 +124,7 @@ function SectionTitle({ title, hint }: { title: string; hint: string }) {
 }
 
 function PresetEditor({ state, busy, columns, onSave }: { state: VoiceState; busy: string | null; columns: 3 | 4 | 6; onSave: (preset: string) => void }) {
+  const { confirm } = useHub();
   const [picked, setPicked] = useState(state.preset);
   const options = [{ id: "", gender: "", style: "Set in the app" }, ...PRESET_VOICES];
   return (
@@ -152,7 +153,15 @@ function PresetEditor({ state, busy, columns, onSave }: { state: VoiceState; bus
       </div>
       <div className="flex items-center justify-between gap-3 mt-3">
         <span className="text-[11px] text-ink-3">Applies to new calls within 10 minutes.</span>
-        <Button variant="primary" disabled={picked === state.preset || busy !== null} onClick={() => onSave(picked)}>
+        <Button variant="primary" disabled={picked === state.preset || busy !== null} onClick={async () => {
+            const yes = await confirm({
+              title: picked ? `Change the voice to ${picked}?` : "Go back to the default voice?",
+              body: picked ? "Callers on these lines will hear this voice." : "Callers will hear the voice set in the app.",
+              takes: "It takes up to 10 minutes to reach the phone lines. Calls already in progress keep the current voice.",
+              confirmLabel: "Change voice",
+            });
+            if (yes) onSave(picked);
+          }}>
           {busy === "Voice" && <Spinner size={13} />} Save voice
         </Button>
       </div>
@@ -179,7 +188,7 @@ function CloneEditor({
   save: (what: string, run: () => Promise<VoiceState>) => Promise<boolean>;
   sideBySide?: boolean;
 }) {
-  const { now } = useHub();
+  const { now, confirm } = useHub();
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [seconds, setSeconds] = useState<number | null>(null);
@@ -200,6 +209,13 @@ function CloneEditor({
 
   const upload = async () => {
     if (!file) return;
+    const yes = await confirm({
+      title: custom ? "Replace the custom voice?" : "Use this recording as the voice?",
+      body: `Callers will hear the agent speak in the voice of "${file.name}".`,
+      takes: "New calls use it within about a minute. Calls already in progress keep the current voice.",
+      confirmLabel: custom ? "Replace voice" : "Upload voice",
+    });
+    if (!yes) return;
     const form = new FormData();
     form.set("license", String(client.id));
     form.set("file", file);
@@ -212,9 +228,15 @@ function CloneEditor({
     }
   };
 
-  const remove = () => {
-    if (!confirm("Remove the custom voice?\n\nCalls go back to the standard voice within a minute.")) return;
-    save("Standard voice", () => voiceApi("DELETE", client.id, {}));
+  const remove = async () => {
+    const yes = await confirm({
+      title: "Remove the custom voice?",
+      body: "Callers will hear the standard voice again. The recording is deleted.",
+      takes: "New calls go back to the standard voice within about a minute.",
+      confirmLabel: "Remove voice",
+      danger: true,
+    });
+    if (yes) save("Standard voice", () => voiceApi("DELETE", client.id, {}));
   };
 
   return (

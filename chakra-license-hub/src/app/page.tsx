@@ -22,7 +22,7 @@ import LicencesPage from "@/components/licences-page";
 import CompanySettingsPage, { AccountPage, TalkTimePage, VoicePage } from "@/components/settings-pages";
 import NewLicensePage from "@/components/new-license-page";
 import PackagesPage from "@/components/packages-page";
-import { Button, Spinner, cx } from "@/components/ui";
+import { Button, ConfirmDialog, Spinner, cx, type ConfirmOptions } from "@/components/ui";
 import { DEFAULT_PACKAGE, DEFAULT_PACKAGES, type Package } from "@/lib/packages";
 import type { Client, ViewerInfo } from "@/lib/types";
 
@@ -80,6 +80,7 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
   const [toastMsg, setToastMsg] = useState<{ text: string; tone: "error" | "success" } | null>(null);
   const [revealed, setRevealed] = useState<{ company: string; key: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [asking, setAsking] = useState<{ options: ConfirmOptions; answer: (yes: boolean) => void } | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   // Routing on the URL hash, so a refresh or a shared link keeps the page.
@@ -148,6 +149,20 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
     setTimeout(() => setToastMsg((t) => (t?.text === text ? null : t)), 3500);
   }, []);
 
+  const confirm = useCallback(
+    (options: ConfirmOptions) =>
+      new Promise<boolean>((resolve) => {
+        setAsking({
+          options,
+          answer: (yes) => {
+            setAsking(null);
+            resolve(yes);
+          },
+        });
+      }),
+    [],
+  );
+
   const reloadClients = useCallback(async (quiet = false) => {
     try {
       const rows = await licenseApi<Client[]>("GET", undefined, quiet);
@@ -172,9 +187,14 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
   // The old key stops working (within a minute at the speech gateway).
   const rotateKey = useCallback(
     async (client: Client) => {
-      if (!confirm(`Issue a new key for ${client.company_name}?\n\nThe current key stops working within a minute, and the company must switch to the new one.`)) {
-        return false;
-      }
+      const yes = await confirm({
+        title: `Issue a new key for ${client.company_name}?`,
+        body: "The company must put the new key in its app. The new key is shown once, right after this.",
+        takes: "The current key stops working within about a minute.",
+        confirmLabel: "Rotate key",
+        danger: true,
+      });
+      if (!yes) return false;
       try {
         const { token, ...row } = await licenseApi<Client & { token: string }>("PUT", { id: client.id, action: "rotate" });
         setClients((cs) => cs.map((c) => (c.id === client.id ? { ...c, ...row, month_minutes: c.month_minutes, last_activity: c.last_activity } : c)));
@@ -185,12 +205,12 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
         return false;
       }
     },
-    [toast],
+    [toast, confirm],
   );
 
   const hub = useMemo<Hub>(
-    () => ({ viewer, clients, clientsLoaded, setClients, reloadClients, packages, setPackages, navigate, toast, rotateKey, now }),
-    [viewer, clients, clientsLoaded, reloadClients, packages, navigate, toast, rotateKey, now],
+    () => ({ viewer, clients, clientsLoaded, setClients, reloadClients, packages, setPackages, navigate, toast, confirm, rotateKey, now }),
+    [viewer, clients, clientsLoaded, reloadClients, packages, navigate, toast, confirm, rotateKey, now],
   );
 
   const logout = async () => {
@@ -289,6 +309,7 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
           </div>
         </main>
 
+        {asking && <ConfirmDialog options={asking.options} onAnswer={asking.answer} />}
         {revealed && <KeyDialog company={revealed.company} keyValue={revealed.key} onClose={() => setRevealed(null)} />}
       </div>
     </HubContext.Provider>

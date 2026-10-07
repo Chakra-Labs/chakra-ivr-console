@@ -122,6 +122,7 @@ export function TalkTimeEditor({
   busy: boolean;
   onSave: (body: { dailyLimitMinutes: number; limitWarningSeconds: number; agentDailyLimits: Record<string, number> }) => void;
 }) {
+  const { confirm } = useHub();
   const savedMinutes = client.daily_limit_minutes ?? 0;
   const savedWarning = client.limit_warning_seconds ?? 60;
   const savedAgents = client.agent_daily_limits ?? {};
@@ -140,7 +141,9 @@ export function TalkTimeEditor({
   const agentCount = Object.keys(nextAgents).length;
 
   return (
-    <div className="space-y-5">
+    // Fills its card: the Save row sits at the bottom when the card is stretched.
+    <div className="flex-1 flex flex-col justify-between gap-5">
+     <div className="space-y-5">
       <div className="flex items-start justify-between gap-4 p-4 rounded-xl bg-panel-2 border border-line">
         <div>
           <div className="text-[13px] font-medium text-ink">Limit each caller&apos;s talk time per day</div>
@@ -213,6 +216,7 @@ export function TalkTimeEditor({
         </details>
       )}
 
+     </div>
       <div className="flex items-center justify-between gap-3 pt-1">
         <span className="text-[11px] text-ink-3">Applies to new calls within 10 minutes.</span>
         <div className="flex gap-2">
@@ -233,10 +237,17 @@ export function TalkTimeEditor({
           <Button
             variant="primary"
             disabled={!valid || unchanged || busy}
-            onClick={() => {
-              if (valid && nextMinutes !== null && nextWarning !== null) {
-                onSave({ dailyLimitMinutes: nextMinutes, limitWarningSeconds: nextWarning, agentDailyLimits: on ? nextAgents : {} });
-              }
+            onClick={async () => {
+              if (!valid || nextMinutes === null || nextWarning === null) return;
+              const yes = await confirm({
+                title: nextMinutes ? "Change the daily talk-time limit?" : "Remove the daily talk-time limit?",
+                body: nextMinutes
+                  ? `Each caller will be able to talk for ${nextMinutes} minutes a day${nextWarning ? `, with a reminder ${nextWarning} seconds before the end` : ""}.`
+                  : "Callers will be able to talk for as long as they need.",
+                takes: "It takes up to 10 minutes to reach the phone lines. Calls already in progress keep the old setting.",
+                confirmLabel: "Save changes",
+              });
+              if (yes) onSave({ dailyLimitMinutes: nextMinutes, limitWarningSeconds: nextWarning, agentDailyLimits: on ? nextAgents : {} });
             }}
           >
             {busy && <Spinner size={13} />} Save changes
@@ -294,10 +305,11 @@ export default function CompanySettingsPage({ id }: { id?: number }) {
         <div className="xl:col-span-12">
           <CompanyPackageCard client={client} />
         </div>
-        <div className="xl:col-span-7">
+        {/* Stretched to the same height, so neither leaves a gap under it. */}
+        <div className="xl:col-span-7 xl:self-stretch">
           <PipelineCard client={client} />
         </div>
-        <div className="xl:col-span-5">
+        <div className="xl:col-span-5 xl:self-stretch">
           <TalkTimeCard client={client} />
         </div>
         <div className="xl:col-span-12">
@@ -312,6 +324,7 @@ function CompanyPackageCard({ client }: { client: Client }) {
   const { packages } = useHub();
   const { busy, update } = useLicenceUpdate(client);
   const [name, setName] = useState(client.company_name);
+  const { confirm } = useHub();
   const [pkg, setPkg] = useState(findPackage(packages, client.package_name)?.name ?? client.package_name ?? DEFAULT_PACKAGE);
   const known = packages.some((p) => p.name === pkg);
 
@@ -341,7 +354,16 @@ function CompanyPackageCard({ client }: { client: Client }) {
                 </option>
               ))}
             </select>
-            <Button disabled={pkg === client.package_name || busy !== null} onClick={() => update({ action: "package", packageName: pkg }, "Package")}>
+            <Button disabled={pkg === client.package_name || busy !== null} onClick={async () => {
+                const p = findPackage(packages, pkg);
+                const yes = await confirm({
+                  title: `Move ${client.company_name} to ${pkg}?`,
+                  body: p ? `${compact(p.maxMinutes)} minutes a month and ${p.lines} calls at once.` : undefined,
+                  takes: "The new limit on calls at once applies within about a minute. Check GPU fleet afterwards: the fleet is sized from packages.",
+                  confirmLabel: "Change package",
+                });
+                if (yes) update({ action: "package", packageName: pkg }, "Package");
+              }}>
               {busy === "Package" && <Spinner size={13} />} Save
             </Button>
           </div>
@@ -357,6 +379,7 @@ type LineRule = { agent: string; pipeline: string };
 /** Which voice AI the company's phone lines run: one for all of them, and any
  * named line ("agent") that runs the other. */
 function PipelineCard({ client }: { client: Client }) {
+  const { confirm } = useHub();
   const { busy, update } = useLicenceUpdate(client);
   const savedDefault = client.pipelines?.[0] ?? "";
   const savedRules = client.agent_pipelines ?? {};
@@ -374,7 +397,7 @@ function PipelineCard({ client }: { client: Client }) {
   const setRule = (at: number, change: Partial<LineRule>) => setRules((rs) => rs.map((r, n) => (n === at ? { ...r, ...change } : r)));
 
   return (
-    <Card title="Voice pipeline" subtitle="Which voice AI answers the company's calls. Only Chakra Labs can change this.">
+    <Card className="h-full" title="Voice pipeline" subtitle="Which voice AI answers the company's calls. Only Chakra Labs can change this.">
       <div className="text-[12px] text-ink-2 mb-2">For all of the company&apos;s phone lines</div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {[...PIPELINES, { id: "", label: "Not assigned", detail: "The company's own app configuration decides" }].map((p) => (
@@ -477,7 +500,20 @@ function PipelineCard({ client }: { client: Client }) {
 
       <div className="flex items-center justify-between gap-3 mt-4">
         <span className="text-[11px] text-ink-3">Running agents switch within 10 minutes. No redeploy is needed.</span>
-        <Button variant="primary" disabled={unchanged || busy !== null} onClick={() => update({ action: "pipelines", pipelines: next, agentPipelines: pins }, "Voice pipeline")}>
+        <Button variant="primary" disabled={unchanged || busy !== null} onClick={async () => {
+          const yes = await confirm({
+            title: `Change ${client.company_name}'s voice pipeline?`,
+            body: (
+              <>
+                {primary ? `Lines will use ${pipelineLabel(primary)}` : "Each line will use what the company's app is configured for"}
+                {different.length > 0 && `, except ${different.map(([agent, p]) => `${agent} (${pipelineLabel(p)})`).join(", ")}`}.
+              </>
+            ),
+            takes: "Running agents switch within 10 minutes, with no redeploy. Calls already in progress finish on the current pipeline.",
+            confirmLabel: "Change pipeline",
+          });
+          if (yes) update({ action: "pipelines", pipelines: next, agentPipelines: pins }, "Voice pipeline");
+        }}>
           {busy && <Spinner size={13} />} Save
         </Button>
       </div>
@@ -496,7 +532,7 @@ function VoiceCard({ client }: { client: Client }) {
 function TalkTimeCard({ client }: { client: Client }) {
   const { busy, update } = useLicenceUpdate(client);
   return (
-    <Card title="Daily talk time" subtitle="The company can also change this from its own account">
+    <Card className="h-full flex flex-col" title="Daily talk time" subtitle="The company can also change this from its own account">
       <TalkTimeEditor client={client} busy={busy !== null} onSave={(body) => update({ action: "daily_limit", ...body }, "Daily talk time")} />
     </Card>
   );
@@ -547,10 +583,17 @@ export function StatusKeyCard({ client }: { client: Client }) {
 }
 
 export function DangerCard({ client }: { client: Client }) {
-  const { setClients, toast, navigate } = useHub();
+  const { setClients, toast, navigate, confirm } = useHub();
   const [busy, setBusy] = useState(false);
   const remove = async () => {
-    if (!confirm(`Delete ${client.company_name}'s licence?\n\nIts key stops working within a minute. Usage history is kept. This cannot be undone.`)) return;
+    const yes = await confirm({
+      title: `Delete ${client.company_name}'s licence?`,
+      body: "The company's phone lines stop taking calls and its IVR Console sign-in is removed. Usage history is kept. This cannot be undone.",
+      takes: "The key stops working within about a minute.",
+      confirmLabel: "Delete licence",
+      danger: true,
+    });
+    if (!yes) return;
     setBusy(true);
     try {
       await licenseApi("DELETE", { id: client.id });
@@ -710,7 +753,7 @@ function generatePassword(): string {
 }
 
 export function ConsoleAccessCard({ client }: { client: Client }) {
-  const { toast, now } = useHub();
+  const { toast, now, confirm } = useHub();
   const [account, setAccount] = useState<ConsoleAccount | null | undefined>(undefined);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -748,7 +791,14 @@ export function ConsoleAccessCard({ client }: { client: Client }) {
   };
 
   const remove = async () => {
-    if (!confirm(`Remove ${client.company_name}'s IVR Console sign-in?\n\nThey are signed out at once and can no longer sign in.`)) return;
+    const yes = await confirm({
+      title: `Remove ${client.company_name}'s IVR Console sign-in?`,
+      body: "The company can no longer sign in to the IVR Console. Its phone lines are not affected.",
+      takes: "They are signed out at once.",
+      confirmLabel: "Remove sign-in",
+      danger: true,
+    });
+    if (!yes) return;
     setBusy("remove");
     try {
       await accountApi("DELETE", { licenseId: client.id });

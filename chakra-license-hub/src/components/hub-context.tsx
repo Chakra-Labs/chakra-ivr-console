@@ -5,6 +5,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 import { track } from "@/lib/loading";
+import type { ConfirmOptions } from "./ui";
 import type { Package } from "@/lib/packages";
 import type { Analytics, Client, ViewerInfo } from "@/lib/types";
 
@@ -56,6 +57,9 @@ export interface Hub {
   setPackages: Dispatch<SetStateAction<Package[]>>;
   navigate: (r: Route) => void;
   toast: (message: string, tone?: "error" | "success") => void;
+  /** Ask before changing a setting (a dialog saying what changes and how long
+   * it takes to apply). Resolves true when confirmed. */
+  confirm: (options: ConfirmOptions) => Promise<boolean>;
   /** Ask, rotate, and show the new key once. Resolves true when rotated. */
   rotateKey: (client: Client) => Promise<boolean>;
   /** Wall clock, refreshed every minute (for "5 min ago" labels). */

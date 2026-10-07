@@ -34,15 +34,15 @@ export default function PackagesPage() {
       {packages.length === 0 ? (
         <Empty>No packages.</Empty>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
           {packages.map((p) => {
             const need = gpusFor(p.lines);
             const users = clients.filter((c) => c.package_name === p.name).length;
             return (
-              <article key={p.id} className="group bg-panel border border-line rounded-2xl p-5 flex flex-col hover:border-line-strong transition-colors">
+              <article key={p.id} className="group bg-panel border border-line rounded-xl p-4 flex flex-col hover:border-line-strong transition-colors">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-panel-3 border border-line flex items-center justify-center text-ink-2 shrink-0">
-                    <Box size={17} />
+                  <div className="w-8 h-8 rounded-lg bg-panel-3 border border-line flex items-center justify-center text-ink-2 shrink-0">
+                    <Box size={15} />
                   </div>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                     <button onClick={() => setDialog(p)} className="p-1.5 rounded-md text-ink-3 hover:text-accent hover:bg-accent/10" aria-label={`Edit ${p.name}`}>
@@ -57,33 +57,33 @@ export default function PackagesPage() {
                     </button>
                   </div>
                 </div>
-                <h3 className="mt-4 text-[16px] font-semibold text-ink">{p.name}</h3>
+                <h3 className="mt-3 text-[14px] font-semibold text-ink leading-tight">{p.name}</h3>
                 <div className="text-[10px] uppercase tracking-wide text-accent mt-0.5 h-[14px]">{p.special ? "Special offer" : ""}</div>
-                <div className="mt-2 text-[20px] font-semibold text-ink tabular">
+                <div className="mt-1 text-[16px] font-semibold text-ink tabular">
                   {p.priceLkr ? (
                     <>
-                      <span className="text-[12px] text-ink-3 font-normal">LKR </span>
+                      <span className="text-[11px] text-ink-3 font-normal">LKR </span>
                       {num(p.priceLkr)}
-                      <span className="text-[12px] text-ink-3 font-normal"> / month</span>
+                      <span className="text-[11px] text-ink-3 font-normal"> / month</span>
                     </>
                   ) : (
                     <span className="text-[13px] text-ink-3 font-normal">No price set</span>
                   )}
                 </div>
-                <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
+                <dl className="mt-3 grid grid-cols-3 gap-1.5 text-center">
                   {[
-                    // Millions are shortened ("10M") so they fit the tile.
-                    { label: "Calls", value: p.calls ? (p.calls >= 1e6 ? compact(p.calls) : num(p.calls)) : "–" },
-                    { label: "Minutes", value: p.maxMinutes >= 1e6 ? compact(p.maxMinutes) : num(p.maxMinutes) },
+                    // Shortened ("75K", "10M") so they fit the tile.
+                    { label: "Calls", value: p.calls ? compact(p.calls) : "–" },
+                    { label: "Minutes", value: compact(p.maxMinutes) },
                     { label: "At once", value: num(p.lines) },
                   ].map((f) => (
-                    <div key={f.label} className="rounded-xl bg-panel-2 border border-line px-2 py-2.5 min-w-0">
-                      <dt className="text-[11px] text-ink-3">{f.label}</dt>
-                      <dd className="text-[13px] font-semibold text-ink tabular truncate mt-0.5">{f.value}</dd>
+                    <div key={f.label} className="rounded-lg bg-panel-2 border border-line px-1.5 py-1.5 min-w-0">
+                      <dt className="text-[10px] text-ink-3">{f.label}</dt>
+                      <dd className="text-[12px] font-semibold text-ink tabular truncate">{f.value}</dd>
                     </div>
                   ))}
                 </dl>
-                <div className="mt-4 pt-3 border-t border-line flex items-center justify-between text-[11px] text-ink-3 tabular">
+                <div className="mt-3 pt-2.5 border-t border-line flex items-center justify-between text-[11px] text-ink-3 tabular">
                   <span>
                     {need.stt} STT + {need.tts} TTS GPUs
                   </span>

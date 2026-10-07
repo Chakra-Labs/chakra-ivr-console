@@ -391,3 +391,55 @@ export function MiniStat({ label, value, tone }: { label: string; value: React.R
     </div>
   );
 }
+
+/** What a confirmation asks: the change, and when it takes effect. */
+export type ConfirmOptions = {
+  title: string;
+  /** What will change, in a sentence or two. */
+  body?: React.ReactNode;
+  /** How long the change takes to apply, e.g. "New calls use it within 10 minutes." */
+  takes?: string;
+  confirmLabel?: string;
+  /** A destructive action: the confirm button is red. */
+  danger?: boolean;
+};
+
+/** A modal that asks before a setting is changed. Escape or a click outside cancels. */
+export function ConfirmDialog({ options, onAnswer }: { options: ConfirmOptions; onAnswer: (yes: boolean) => void }) {
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onAnswer(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onAnswer]);
+  return (
+    <div
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[95] flex items-center justify-center p-4"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={options.title}
+      onMouseDown={(e) => e.target === e.currentTarget && onAnswer(false)}
+    >
+      <div className="w-full max-w-md bg-panel-2 border border-line-strong rounded-2xl p-6 shadow-2xl">
+        <h2 className="text-[16px] font-semibold text-ink">{options.title}</h2>
+        {options.body && <div className="text-[13px] text-ink-2 mt-2 leading-relaxed">{options.body}</div>}
+        {options.takes && (
+          <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-accent/25 bg-accent/[0.05] px-3 py-2.5 text-[12px] text-ink-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent mt-0.5 shrink-0" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            <span>{options.takes}</span>
+          </div>
+        )}
+        <div className="flex justify-end gap-2 mt-6">
+          <Button variant="ghost" onClick={() => onAnswer(false)}>
+            Cancel
+          </Button>
+          <Button variant={options.danger ? "danger" : "primary"} autoFocus onClick={() => onAnswer(true)}>
+            {options.confirmLabel ?? "Confirm"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
