@@ -86,8 +86,8 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
 
   // Routing on the URL hash, so a refresh or a shared link keeps the page.
   // Page changes run inside a view transition: the browser cross-fades the
-  // page, and morphs elements that share a view-transition-name (a company
-  // card into the company page's header card, and back).
+  // page, and morphs elements that share a view-transition-name (a company or
+  // licence card into its page's header card, and back).
   const routeRef = useRef<Route>({ page: "dashboard" });
   const show = useCallback((r: Route, animate: boolean) => {
     const before = routeRef.current;
@@ -105,8 +105,9 @@ function Shell({ viewer }: { viewer: ViewerInfo }) {
     const doc = document as Document & { startViewTransition?: (cb: () => void) => { finished: Promise<void> } };
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (animate && !samePage && !reduce && doc.startViewTransition) {
-      // Into a company: slide forward. Out of one: slide back. Else cross-fade.
-      const nav = r.page === "company" && before.page !== "company" ? "forward" : before.page === "company" && r.page !== "company" ? "back" : "fade";
+      // Into a company or a licence: slide forward. Out of one: slide back. Else cross-fade.
+      const inside = (x: Route) => x.page === "company" || (x.page === "licences" && x.id != null);
+      const nav = inside(r) && !inside(before) ? "forward" : inside(before) && !inside(r) ? "back" : "fade";
       document.documentElement.dataset.nav = nav;
       doc.startViewTransition(update).finished.finally(() => {
         delete document.documentElement.dataset.nav;
