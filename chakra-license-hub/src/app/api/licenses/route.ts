@@ -304,6 +304,7 @@ export async function DELETE(request: Request) {
   try {
     await ensureVoiceTable();
     await pool.query("DELETE FROM license_voices WHERE license_id = $1", [id]);
+    await pool.query("DELETE FROM license_greetings WHERE license_id = $1", [id]).catch(() => undefined);
     await pool.query("DELETE FROM licenses WHERE id = $1", [id]);
     return Response.json({ success: true });
   } catch (error) {

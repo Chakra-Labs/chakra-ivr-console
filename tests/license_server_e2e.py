@@ -76,6 +76,8 @@ try:
             break
         except Exception:
             time.sleep(0.5)
+    first = verify(tokens[0])
+    assert (first["greeting_mode"], first["greeting_id"], first["greeting_text"]) == ("", "", ""), first
     voices = [verify(t)["gemini_voice"] for t in tokens]
     print("signed gemini_voice per licence:", voices)
     assert voices == ["", "Leda", ""], voices

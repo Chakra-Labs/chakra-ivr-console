@@ -42,7 +42,10 @@ MOCK_VALID_TOKENS = {"chk_live_test123": True, "chk_live_unpaid456": False}
 
 LOOKUP = """
     SELECT id, company_name, package_name, is_active, pipelines, agent_pipelines,
-           daily_limit_minutes, limit_warning_seconds, agent_daily_limits, gemini_voice FROM licenses
+           daily_limit_minutes, limit_warning_seconds, agent_daily_limits, gemini_voice, greeting_mode,
+           (SELECT g.greeting_id FROM license_greetings g WHERE g.license_id = licenses.id) AS greeting_id,
+           (SELECT g.transcript FROM license_greetings g WHERE g.license_id = licenses.id) AS greeting_text
+    FROM licenses
     WHERE token_hash = $1 OR (token_hash IS NULL AND token = $2)
 """
 
@@ -76,7 +79,25 @@ PIPELINE_COLUMNS = (
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS agent_daily_limits JSONB NOT NULL DEFAULT '{}'::jsonb",
     # The preset voice of the licence's Gemini Live lines (NULL = the app's own).
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS gemini_voice TEXT",
+    # How calls are greeted: 'recorded' | 'auto' | NULL (the app decides).
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS greeting_mode TEXT",
 )
+
+# Added 2026-10-07: a licence's recorded greeting opening, uploaded in IVR Console
+# (the hub's api/greeting and chakra-gpu-fleet's schema.sql create it too).
+LICENSE_GREETINGS = """
+CREATE TABLE IF NOT EXISTS license_greetings (
+    license_id    INTEGER PRIMARY KEY,
+    greeting_id   TEXT NOT NULL,
+    audio         BYTEA NOT NULL,
+    transcript    TEXT NOT NULL,
+    seconds       REAL NOT NULL DEFAULT 0,
+    file_name     TEXT,
+    updated_by    TEXT,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+"""
+
 
 
 def _pipelines(row) -> tuple[list[str], dict[str, str]]:
@@ -144,6 +165,7 @@ async def lifespan(app: FastAPI):
         # them too).
         for statement in PIPELINE_COLUMNS:
             await db_pool.execute(statement)
+        await db_pool.execute(LICENSE_GREETINGS)
     elif not MOCK_MODE:
         raise RuntimeError("DATABASE_URL is not set (set LICENSE_SERVER_MOCK=1 for local testing only)")
     else:
@@ -249,6 +271,13 @@ async def verify_signed(req: VerifyRequest):
         # ("" = the app's own setting); chakra-ivr-core 0.6+ uses it. The voice
         # of Chakra Voice lines is a reference clip, applied at the speech gateway.
         "gemini_voice": voice if (voice := row.get("gemini_voice")) in GEMINI_VOICES else "",
+        # How calls are greeted (chakra-ivr-core 0.6.5+): "recorded" plays a
+        # recorded opening the moment the call connects: the one uploaded in IVR
+        # Console (its id, and what it says), else one the app makes itself.
+        # "auto" generates the whole greeting. "" leaves it to the app.
+        "greeting_mode": mode if (mode := row.get("greeting_mode")) in ("recorded", "auto") else "",
+        "greeting_id": row.get("greeting_id") or "",
+        "greeting_text": row.get("greeting_text") or "",
         "key_hash": key_hash(req.token),
         "nonce": req.nonce,
         "issued_at": int(time.time()),

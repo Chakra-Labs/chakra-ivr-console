@@ -111,3 +111,7 @@ export function licenceChangeTiming(modes: VoiceMode[] | undefined, stops: boole
   const slow = `${both ? "Gemini Live lines take" : "Lines take"} calls again within 10 minutes.`;
   return `${[chakra && fast, gemini && slow].filter(Boolean).join(" ")} An app that was restarted while suspended must be started again.`;
 }
+
+// The greeting's recorded opening line: a short WAV and what is said in it.
+export const GREETING_MIN_SECONDS = 1;
+export const GREETING_MAX_SECONDS = 20;

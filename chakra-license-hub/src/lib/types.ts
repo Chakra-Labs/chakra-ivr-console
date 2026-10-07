@@ -67,6 +67,20 @@ export interface VoiceState {
   } | null;
 }
 
+/** How a licence's calls are greeted (GET /api/greeting). */
+export interface GreetingState {
+  /** "recorded": a recorded opening plays at once; "auto": generated; "": the app decides. */
+  mode: "recorded" | "auto" | "";
+  recording: {
+    greeting_id: string;
+    file_name: string | null;
+    seconds: number;
+    transcript: string;
+    updated_by: string | null;
+    updated_at: string;
+  } | null;
+}
+
 export interface DailyPoint {
   day: string; // YYYY-MM-DD, Sri Lanka time
   stt_min: number;

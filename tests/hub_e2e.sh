@@ -102,6 +102,22 @@ check "company removes its clip" 200 "$(code -b /tmp/co $J -X DELETE $U/api/voic
 check "clip gone" null "$(curl -s -b /tmp/co $U/api/voice | js 'String(d.custom)')"
 check "no clip to play" 404 "$(code -b /tmp/co "$U/api/voice?audio=1")"
 
+# The greeting: generated or a recorded opening, optionally uploaded.
+check "greeting: nothing chosen yet" "|null" "$(curl -s -b /tmp/admin "$U/api/greeting?license=1" | js 'd.mode+"|"+d.recording')"
+check "choose a recorded opening" 200 "$(code -b /tmp/admin $J -X PUT $U/api/greeting -d '{"licenseId":1,"mode":"recorded"}')"
+check "an unknown mode is refused" 400 "$(code -b /tmp/admin $J -X PUT $U/api/greeting -d '{"licenseId":1,"mode":"loud"}')"
+check "upload a greeting recording" 200 "$(code -b /tmp/admin $O -X POST $U/api/greeting -F license=1 -F file=@/tmp/ok.wav -F "transcript=$SI")"
+check "recording stored" "recorded g1- 7.0" "$(curl -s -b /tmp/admin "$U/api/greeting?license=1" | js 'd.mode+" "+d.recording.greeting_id.slice(0,3)+" "+d.recording.seconds.toFixed(1)')"
+check "recording plays back" "200 audio/wav" "$(curl -s -b /tmp/admin -o /dev/null -w '%{http_code} %{content_type}' "$U/api/greeting?license=1&audio=1")"
+check "not a WAV refused" 400 "$(code -b /tmp/admin $O -X POST $U/api/greeting -F license=1 -F file=@/tmp/fake.wav -F "transcript=$SI")"
+check "no text refused" 400 "$(code -b /tmp/admin $O -X POST $U/api/greeting -F license=1 -F file=@/tmp/ok.wav -F "transcript= ")"
+check "company reads its greeting" recorded "$(curl -s -b /tmp/co $U/api/greeting | js 'd.mode')"
+check "company cannot read another's" 403 "$(code -b /tmp/co "$U/api/greeting?license=2")"
+check "company cannot change another's" 403 "$(code -b /tmp/co $J -X PUT $U/api/greeting -d '{"licenseId":2,"mode":"auto"}')"
+check "company switches to a generated greeting" 200 "$(code -b /tmp/co $J -X PUT $U/api/greeting -d '{"mode":"auto"}')"
+check "company removes the recording" 200 "$(code -b /tmp/co $J -X DELETE $U/api/greeting -d '{}')"
+check "recording gone" "auto|null" "$(curl -s -b /tmp/admin "$U/api/greeting?license=1" | js 'd.mode+"|"+d.recording')"
+
 # Pipelines decide the voice kinds; deleting a licence removes its clip.
 check "pipeline change (admin)" 200 "$(code -b /tmp/admin $J -X PUT $U/api/licenses -d '{"id":1,"action":"pipelines","pipelines":["chakra"],"agentPipelines":{}}')"
 check "…reply carries the new voice kinds" clone "$(js 'd.voice_modes.join()' < /tmp/body)"

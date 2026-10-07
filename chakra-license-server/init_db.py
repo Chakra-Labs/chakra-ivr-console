@@ -46,7 +46,24 @@ PIPELINE_COLUMNS = (
     # Added 2026-10-07: the voice callers hear. Gemini Live lines: a preset name.
     # The preset voice of the licence's Gemini Live lines (NULL = the app's own).
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS gemini_voice TEXT",
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS greeting_mode TEXT",
 )
+
+# Added 2026-10-07: a licence's recorded greeting opening, uploaded in IVR Console
+# (the hub's api/greeting and chakra-gpu-fleet's schema.sql create it too).
+LICENSE_GREETINGS = """
+CREATE TABLE IF NOT EXISTS license_greetings (
+    license_id    INTEGER PRIMARY KEY,
+    greeting_id   TEXT NOT NULL,
+    audio         BYTEA NOT NULL,
+    transcript    TEXT NOT NULL,
+    seconds       REAL NOT NULL DEFAULT 0,
+    file_name     TEXT,
+    updated_by    TEXT,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+"""
+
 
 
 # Added 2026-10-05: IVR Console sign-ins for companies, one per licence (the hub
@@ -95,6 +112,7 @@ async def init_db() -> None:
             await conn.execute(statement)
         await conn.execute(CONSOLE_USERS)
         await conn.execute(LICENSE_VOICES)
+        await conn.execute(LICENSE_GREETINGS)
         # Only the additive migration runs automatically; 002 (drop plaintext
         # keys) is irreversible and run by hand once hashed lookups are live.
         for path in MIGRATIONS:

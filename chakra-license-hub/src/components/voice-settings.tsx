@@ -11,8 +11,17 @@ import { Check, Mic, Trash2, Upload } from "./icons";
 import { Badge, Button, LinesSkeleton, Spinner, cx, inputClass } from "./ui";
 import { ago } from "@/lib/format";
 import { track } from "@/lib/loading";
-import { CLIP_MAX_SECONDS, CLIP_MIN_SECONDS, PRESET_VOICES, TRANSCRIPT_MAX_CHARS, clipProblem, readWav } from "@/lib/voice-rules";
-import type { Client, VoiceState } from "@/lib/types";
+import {
+  CLIP_MAX_SECONDS,
+  CLIP_MIN_SECONDS,
+  GREETING_MAX_SECONDS,
+  GREETING_MIN_SECONDS,
+  PRESET_VOICES,
+  TRANSCRIPT_MAX_CHARS,
+  clipProblem,
+  readWav,
+} from "@/lib/voice-rules";
+import type { Client, GreetingState, VoiceState } from "@/lib/types";
 
 async function voiceApi(method: string, licenseId: number, body?: Record<string, unknown> | FormData): Promise<VoiceState> {
   const form = body instanceof FormData;
@@ -98,6 +107,15 @@ export function VoiceEditor({ client, technical, wide = false }: { client: Clien
             }
           />
           <CloneEditor client={client} state={state} busy={busy} save={save} sideBySide={wide && !both} />
+        </section>
+      )}
+      {shown.includes("clone") && (
+        <section className={wide && both ? "xl:col-span-2" : undefined}>
+          <SectionTitle
+            title={technical ? "Chakra Voice lines: greeting" : "Greeting"}
+            hint="How a call is opened. A recorded opening plays the instant the call connects; a generated one takes a few seconds."
+          />
+          <GreetingEditor client={client} />
         </section>
       )}
       {shown.includes("preset") && (
@@ -338,6 +356,218 @@ function CloneEditor({
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── greeting ──
+
+async function greetingApi(method: string, licenseId: number, body?: Record<string, unknown> | FormData): Promise<GreetingState> {
+  const form = body instanceof FormData;
+  const res = await track(
+    fetch(method === "GET" ? `/api/greeting?license=${licenseId}` : "/api/greeting", {
+      method,
+      headers: form || !body ? undefined : { "Content-Type": "application/json" },
+      body: form ? body : body ? JSON.stringify({ licenseId, ...body }) : undefined,
+      cache: "no-store",
+    }),
+  );
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) signedOut();
+  if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+  return data as GreetingState;
+}
+
+const GREETING_MODES = [
+  { id: "recorded", label: "Recorded opening", detail: "Plays the instant the call connects. The agent then continues, and still welcomes a returning caller by what they called about." },
+  { id: "auto", label: "Generated each call", detail: "The agent composes the whole greeting. Callers wait a few seconds before they hear it." },
+] as const;
+
+function GreetingEditor({ client }: { client: Client }) {
+  const { toast, confirm, now } = useHub();
+  const input = useRef<HTMLInputElement>(null);
+  const [state, setState] = useState<GreetingState | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [problem, setProblem] = useState("");
+  const [transcript, setTranscript] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    greetingApi("GET", client.id)
+      .then((s) => live && setState(s))
+      .catch((e) => live && toast(`Could not load the greeting: ${(e as Error).message}`));
+    return () => {
+      live = false;
+    };
+  }, [client.id, toast]);
+
+  if (!state) return <LinesSkeleton rows={3} />;
+  const rec = state.recording;
+
+  const run = async (what: string, call: () => Promise<GreetingState>) => {
+    setBusy(what);
+    try {
+      setState(await call());
+      toast(`${what} saved`, "success");
+      return true;
+    } catch (e) {
+      toast((e as Error).message);
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const setMode = async (mode: string) => {
+    if (mode === state.mode) return;
+    const yes = await confirm({
+      title: mode === "recorded" ? "Open calls with a recorded greeting?" : "Generate the greeting on every call?",
+      body:
+        mode === "recorded"
+          ? rec
+            ? "Callers will hear your uploaded recording the moment the call connects."
+            : "Callers will hear a recording of the standard opening line. The first call after this makes that recording and is greeted the usual way."
+          : "The agent will compose the whole greeting each time. Callers wait a few seconds before they hear it.",
+      takes: "It takes up to 10 minutes to reach the phone lines. No redeploy is needed.",
+      confirmLabel: "Change greeting",
+    });
+    if (yes) run("Greeting", () => greetingApi("PUT", client.id, { mode }));
+  };
+
+  const choose = async (f: File | null) => {
+    setFile(f);
+    setProblem("");
+    if (!f) return;
+    const wav = readWav(new Uint8Array(await f.arrayBuffer()));
+    if (typeof wav === "string") setProblem(wav);
+    else if (wav.bits !== 16) setProblem("Save the recording as a 16-bit PCM WAV file.");
+    else if (wav.seconds < GREETING_MIN_SECONDS || wav.seconds > GREETING_MAX_SECONDS) {
+      setProblem(`The recording is ${wav.seconds.toFixed(1)} seconds long. It must be ${GREETING_MIN_SECONDS} to ${GREETING_MAX_SECONDS} seconds.`);
+    }
+  };
+
+  const upload = async () => {
+    if (!file) return;
+    const yes = await confirm({
+      title: rec ? "Replace the greeting recording?" : "Use this recording as the greeting?",
+      body: `Callers will hear "${file.name}" when a call connects, then the agent continues from it.`,
+      takes: "It takes up to 10 minutes to reach the phone lines. The first call after that fetches the recording and is greeted the usual way.",
+      confirmLabel: rec ? "Replace recording" : "Upload recording",
+    });
+    if (!yes) return;
+    const form = new FormData();
+    form.set("license", String(client.id));
+    form.set("file", file);
+    form.set("transcript", transcript);
+    if (await run("Greeting recording", () => greetingApi("POST", client.id, form))) {
+      setFile(null);
+      setTranscript("");
+      if (input.current) input.current.value = "";
+    }
+  };
+
+  const remove = async () => {
+    const yes = await confirm({
+      title: "Remove the greeting recording?",
+      body: "With a recorded opening still chosen, callers will hear a recording of the standard opening line instead.",
+      takes: "It takes up to 10 minutes to reach the phone lines.",
+      confirmLabel: "Remove recording",
+      danger: true,
+    });
+    if (yes) run("Greeting recording", () => greetingApi("DELETE", client.id, {}));
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" aria-label="Greeting">
+        {GREETING_MODES.map((m) => {
+          const on = state.mode === m.id;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              disabled={busy !== null}
+              onClick={() => setMode(m.id)}
+              className={cx("relative text-left p-3 rounded-xl border transition-colors", on ? "bg-accent/10 border-accent/50" : "bg-panel-2 border-line hover:border-line-strong")}
+            >
+              <div className={cx("text-[13px] font-medium", on ? "text-accent" : "text-ink")}>{m.label}</div>
+              <div className="text-[12px] text-ink-3 mt-0.5">{m.detail}</div>
+              {on && <Check size={13} className="absolute top-3 right-3 text-accent" />}
+            </button>
+          );
+        })}
+      </div>
+      {!state.mode && <p className="text-[12px] text-ink-3">Not chosen here yet: the app&apos;s own setting decides.</p>}
+
+      {state.mode !== "auto" && (
+        <div className="rounded-xl border border-line p-4 space-y-3">
+          {rec ? (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] text-ink font-medium truncate">{rec.file_name || "Greeting recording"}</div>
+                  <div className="text-[11px] text-ink-3">
+                    {rec.seconds.toFixed(1)} s · uploaded {ago(rec.updated_at, now)}
+                    {rec.updated_by ? ` by ${rec.updated_by}` : ""}
+                  </div>
+                </div>
+                <Button variant="danger" size="sm" disabled={busy !== null} onClick={remove}>
+                  <Trash2 size={13} /> Remove
+                </Button>
+              </div>
+              <audio key={rec.greeting_id} controls preload="none" className="w-full h-9" src={`/api/greeting?license=${client.id}&audio=1&v=${rec.greeting_id}`} />
+              <p className="text-[12px] text-ink-2">
+                <span className="text-ink-3">It says: </span>
+                {rec.transcript}
+              </p>
+            </div>
+          ) : (
+            <p className="text-[13px] text-ink-2">
+              No recording uploaded: with a recorded opening chosen, the app records its standard opening line itself, in the
+              current voice, on its first call.
+            </p>
+          )}
+          <div className="pt-1 border-t border-line space-y-3">
+            <div className="text-[13px] font-medium text-ink pt-3">{rec ? "Replace it" : "Upload your own opening"}</div>
+            <div>
+              <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor={`greet-file-${client.id}`}>
+                Recording <span className="text-ink-3">(16-bit WAV, {GREETING_MIN_SECONDS} to {GREETING_MAX_SECONDS} seconds: the opening line only)</span>
+              </label>
+              <input
+                ref={input}
+                id={`greet-file-${client.id}`}
+                type="file"
+                accept=".wav,audio/wav,audio/x-wav"
+                onChange={(e) => choose(e.target.files?.[0] ?? null)}
+                className="block w-full text-[12px] text-ink-2 file:mr-3 file:h-8 file:px-3 file:rounded-lg file:border file:border-line-strong file:bg-panel-3 file:text-ink file:text-[12px] file:cursor-pointer"
+              />
+              {file && problem && <p className="text-[11px] mt-1.5 text-critical">{problem}</p>}
+            </div>
+            <div>
+              <label className="block text-[12px] text-ink-2 mb-1.5" htmlFor={`greet-text-${client.id}`}>
+                What is said in it <span className="text-ink-3">(word for word: the agent is told it has already said this)</span>
+              </label>
+              <textarea
+                id={`greet-text-${client.id}`}
+                className={cx(inputClass, "h-auto min-h-[60px] py-2 leading-relaxed")}
+                maxLength={TRANSCRIPT_MAX_CHARS}
+                value={transcript}
+                placeholder="ආයුබෝවන්! ගොවි මිතුරු වෙත ඔබව සාදරයෙන් පිළිගන්නවා."
+                onChange={(e) => setTranscript(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] text-ink-3">Record only the fixed opening. The agent adds the rest, such as what a returning caller last asked about.</span>
+              <Button variant="primary" disabled={!file || !!problem || !transcript.trim() || busy !== null} onClick={upload}>
+                {busy === "Greeting recording" ? <Spinner size={13} /> : <Upload size={14} />} {rec ? "Replace" : "Upload"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
