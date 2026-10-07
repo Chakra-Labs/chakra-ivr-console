@@ -73,14 +73,15 @@ function useVoice(client: Client) {
 }
 
 /** `technical`: name the pipelines (admins). A company sees the same editors
- * described by what they do. */
-export function VoiceEditor({ client, technical }: { client: Client; technical: boolean }) {
+ * described by what they do. `wide`: the card spans the page, so lay the parts
+ * out side by side. */
+export function VoiceEditor({ client, technical, wide = false }: { client: Client; technical: boolean; wide?: boolean }) {
   const { state, busy, save } = useVoice(client);
   if (!state) return <LinesSkeleton rows={5} />;
   const both = state.modes.length > 1;
 
   return (
-    <div className="space-y-6">
+    <div className={wide && both ? "grid grid-cols-1 xl:grid-cols-2 gap-x-8 gap-y-6 items-start" : "space-y-6"}>
       {state.modes.includes("clone") && (
         <section>
           <SectionTitle
@@ -91,7 +92,7 @@ export function VoiceEditor({ client, technical }: { client: Client; technical: 
                 : "Upload a short recording of the voice you want. Your agent will speak in that voice."
             }
           />
-          <CloneEditor client={client} state={state} busy={busy} save={save} />
+          <CloneEditor client={client} state={state} busy={busy} save={save} sideBySide={wide && !both} />
         </section>
       )}
       {state.modes.includes("preset") && (
@@ -106,7 +107,7 @@ export function VoiceEditor({ client, technical }: { client: Client; technical: 
                   : "Choose the voice your callers hear."
             }
           />
-          <PresetEditor state={state} busy={busy} onSave={(preset) => save("Voice", () => voiceApi("PUT", client.id, { preset }))} />
+          <PresetEditor state={state} busy={busy} roomy={wide && !both} onSave={(preset) => save("Voice", () => voiceApi("PUT", client.id, { preset }))} />
         </section>
       )}
     </div>
@@ -122,12 +123,12 @@ function SectionTitle({ title, hint }: { title: string; hint: string }) {
   );
 }
 
-function PresetEditor({ state, busy, onSave }: { state: VoiceState; busy: string | null; onSave: (preset: string) => void }) {
+function PresetEditor({ state, busy, roomy, onSave }: { state: VoiceState; busy: string | null; roomy?: boolean; onSave: (preset: string) => void }) {
   const [picked, setPicked] = useState(state.preset);
   const options = [{ id: "", gender: "", style: "Set in the app" }, ...PRESET_VOICES];
   return (
     <div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2" role="radiogroup" aria-label="Preset voice">
+      <div className={cx("grid grid-cols-2 sm:grid-cols-3 gap-2", roomy ? "lg:grid-cols-4 xl:grid-cols-6" : "lg:grid-cols-4")} role="radiogroup" aria-label="Preset voice">
         {options.map((v) => {
           const on = picked === v.id;
           return (
@@ -170,11 +171,13 @@ function CloneEditor({
   state,
   busy,
   save,
+  sideBySide,
 }: {
   client: Client;
   state: VoiceState;
   busy: string | null;
   save: (what: string, run: () => Promise<VoiceState>) => Promise<boolean>;
+  sideBySide?: boolean;
 }) {
   const { now } = useHub();
   const input = useRef<HTMLInputElement>(null);
@@ -215,7 +218,7 @@ function CloneEditor({
   };
 
   return (
-    <div className="space-y-4">
+    <div className={sideBySide ? "grid grid-cols-1 xl:grid-cols-2 gap-4 items-start" : "space-y-4"}>
       {custom ? (
         <div className="rounded-xl bg-panel-2 border border-line p-4 space-y-3">
           <div className="flex flex-wrap items-center gap-2">

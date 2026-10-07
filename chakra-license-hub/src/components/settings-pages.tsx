@@ -290,13 +290,18 @@ export default function CompanySettingsPage({ id }: { id?: number }) {
       </section>
 
       <div key={client.id} className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-        <div className="xl:col-span-7 space-y-4">
+        {/* Full-width rows above and below two cards of about the same height. */}
+        <div className="xl:col-span-12">
           <CompanyPackageCard client={client} />
-          <PipelineCard client={client} />
-          <VoiceCard client={client} />
         </div>
-        <div className="xl:col-span-5 space-y-4">
+        <div className="xl:col-span-7">
+          <PipelineCard client={client} />
+        </div>
+        <div className="xl:col-span-5">
           <TalkTimeCard client={client} />
+        </div>
+        <div className="xl:col-span-12">
+          <VoiceCard client={client} />
         </div>
       </div>
     </div>
@@ -483,7 +488,7 @@ function PipelineCard({ client }: { client: Client }) {
 function VoiceCard({ client }: { client: Client }) {
   return (
     <Card title="Voice" subtitle="The voice callers hear. The company can also change this from its own account.">
-      <VoiceEditor client={client} technical />
+      <VoiceEditor client={client} technical wide />
     </Card>
   );
 }
