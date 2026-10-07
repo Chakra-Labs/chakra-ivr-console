@@ -21,10 +21,7 @@ export function CompanyCostCard({ usage, cost }: { usage: LicenseUsage; cost: Co
   const total = usd(usage);
   const share = cachedShare(usage);
   return (
-    <Card
-      title="LLM cost"
-      subtitle={`What this company's calls have cost in LLM usage this month (USD)${usage.month_llm_model ? ` · model: ${usage.month_llm_model}` : ""}`}
-    >
+    <Card title="LLM cost" subtitle="What this company's calls have cost in LLM usage this month (USD)">
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
         <MiniStat label="Cost" value={money(total, 2)} />
         <MiniStat label="Model" value={usage.month_llm_model || "–"} />
