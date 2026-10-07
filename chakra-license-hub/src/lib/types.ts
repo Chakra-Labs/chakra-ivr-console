@@ -128,21 +128,22 @@ export interface LicenseUsage {
   last_month_minutes: number;
   last_month_requests: number;
   last_activity: string | null;
-  /** Cost to serve this month, USD (admins only): the managed LLM's requests,
-   * and this licence's share of the GPU rent. */
+  /** The managed LLM this month (admins only): what its requests cost in USD,
+   * and the tokens behind that. */
   month_llm_usd?: number;
-  month_gpu_usd?: number;
+  month_llm_requests?: number;
+  month_llm_in?: number;
+  month_llm_cached?: number;
+  month_llm_out?: number;
 }
 
-/** What the fleet has cost this month, USD (admins only). */
+/** What the managed LLM has cost this month, USD (admins only). */
 export interface CostSummary {
   llm_usd: number;
   /** The part of `llm_usd` the provider stated itself (the rest is tokens x list price). */
   llm_reported_usd: number;
-  /** GPU rent since the month began, the part of it no licence used, and the fleet's rate now. */
-  gpu_rent_usd: number;
-  gpu_idle_usd: number;
-  gpu_hourly_usd: number;
+  /** Requests recorded with no cost: made before cost was recorded, or on an unpriced model. */
+  unpriced_requests: number;
   /** A provider's remaining credit, where it has an API for one. */
   balance: { provider: string; usd: number } | null;
 }
