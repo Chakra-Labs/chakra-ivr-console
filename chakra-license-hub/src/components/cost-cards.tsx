@@ -2,6 +2,7 @@
 
 import { Card, Empty, MiniStat } from "./ui";
 import { compact, minutes, money, num, pct } from "@/lib/format";
+import { usesChakraVoice } from "@/lib/pipelines";
 import type { Client, CostSummary, LicenseUsage } from "@/lib/types";
 
 // What the managed LLM has cost Chakra Labs for each company this month
@@ -52,7 +53,12 @@ export function CostTable({
 }) {
   if (!cost) return null;
   const names = new Map(clients.map((c) => [c.id, c.company_name]));
-  const rows = licenses.filter((u) => (u.month_llm_requests ?? 0) > 0).sort((a, b) => usd(b) - usd(a));
+  const onChakra = new Set(clients.filter(usesChakraVoice).map((c) => c.id));
+  // Companies on Chakra Voice, plus any other that has run up a cost this month
+  // (one moved to Gemini Live part-way through): money spent is never hidden.
+  const rows = licenses
+    .filter((u) => (u.month_llm_requests ?? 0) > 0 && (onChakra.has(u.license_id) || usd(u) > 0))
+    .sort((a, b) => usd(b) - usd(a));
   const requests = rows.reduce((a, u) => a + (u.month_llm_requests ?? 0), 0);
   const input = rows.reduce((a, u) => a + tokensIn(u), 0);
   const cached = rows.reduce((a, u) => a + (u.month_llm_cached ?? 0), 0);
@@ -65,7 +71,7 @@ export function CostTable({
         <MiniStat label={cost.balance ? `${cost.balance.provider} balance` : "Provider balance"} value={cost.balance ? money(cost.balance.usd, 2) : "–"} />
       </div>
       {rows.length === 0 ? (
-        <Empty>No LLM requests have gone through the gateway this month.</Empty>
+        <Empty>No company on Chakra Voice has used the LLM this month.</Empty>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
@@ -109,7 +115,7 @@ export function CostTable({
         {HOW}
         {cost.llm_usd > 0 && ` ${pct(cost.llm_reported_usd / cost.llm_usd)} of this month's figure is the provider's own.`}
         {cost.unpriced_requests > 0 && ` ${num(cost.unpriced_requests)} request${cost.unpriced_requests === 1 ? " was" : "s were"} made before cost was recorded, or on a model with no price set, and count as zero.`}
-        {" "}Companies on Gemini Live use their own Google key and do not appear here.
+        {" "}Only companies on Chakra Voice are listed; Gemini Live runs on the company's own Google key.
       </p>
     </Card>
   );

@@ -8,6 +8,7 @@ import { useFleet } from "./fleet-context";
 import { useAnalytics, useHub } from "./hub-context";
 import { AlertTriangle, ArrowLeft, Building, Calendar, Clock, Gauge, Settings, Zap } from "./icons";
 import { CompanyCostCard } from "./cost-cards";
+import { usesChakraVoice } from "@/lib/pipelines";
 import { Badge, Button, Card, ChartSkeleton, Empty, ErrorBanner, KeyValue, LinesSkeleton, Meter, MiniStat, Segmented, Skeleton, Stat, cx } from "./ui";
 import { ago, compact, dateOnly, dateTime, dayLabel, minutes, num, pct, signedPct } from "@/lib/format";
 import { DEFAULT_PACKAGE, INFLIGHT_PER_LINE, gpusFor, packageLines, packageQuota } from "@/lib/packages";
@@ -148,7 +149,9 @@ export default function CompanyDetail({ id, companyView = false }: { id: number;
         />
       </div>
 
-      {!companyView && <CompanyCostCard usage={u} cost={data?.cost} />}
+      {/* The managed LLM serves Chakra Voice calls only; a Gemini Live company
+          runs on its own Google key and has no cost here to show. */}
+      {!companyView && usesChakraVoice(client) && <CompanyCostCard usage={u} cost={data?.cost} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card title="Overview & package">
